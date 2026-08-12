@@ -11,4 +11,5 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
-CMD python live_server.py --port $PORT --host 0.0.0.0 --no-browser
+EXPOSE 8080
+CMD ["sh", "-c", "echo Starting on port ${PORT:-8080} && python live_server.py --port ${PORT:-8080} --host 0.0.0.0 --no-browser"]
