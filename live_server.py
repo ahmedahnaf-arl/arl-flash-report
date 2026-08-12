@@ -727,6 +727,21 @@ class LiveHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split('?')[0].rstrip('/')
 
+        if path == '/health':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            import json as _json
+            try:
+                conn = get_conn()
+                c = conn.cursor()
+                c.execute("SELECT 1")
+                conn.close()
+                self.wfile.write(_json.dumps({"status":"ok","db":"connected"}).encode())
+            except Exception as e:
+                self.wfile.write(_json.dumps({"status":"error","db":str(e)}).encode())
+            return
+
         if path in ('', '/', '/report'):
             try:
                 rd = detect_report_date()
@@ -738,10 +753,13 @@ class LiveHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(html.encode('utf-8'))
             except Exception as e:
+                import traceback
                 self.send_response(500)
                 self.send_header('Content-Type', 'text/plain')
                 self.end_headers()
-                self.wfile.write(f'Error: {e}'.encode())
+                err = traceback.format_exc()
+                self.wfile.write(err.encode())
+                print(f"ERROR: {e}", flush=True)
             return
 
         # Serve static files
