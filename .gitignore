@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.log
+*.bat
+*.lnk
+service*.log
+ngrok*.txt
+index.html
+server.py
+build_report.py
