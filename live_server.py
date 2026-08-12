@@ -769,8 +769,8 @@ class ThreadedHTTPServer(ThreadingMixIn, http.server.HTTPServer):
 if __name__ == '__main__':
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument('--port', type=int, default=PORT)
-    ap.add_argument('--host', default=HOST)
+    ap.add_argument('--port', type=int, default=int(os.environ.get('PORT', PORT)))
+    ap.add_argument('--host', default=os.environ.get('HOST', HOST))
     ap.add_argument('--no-browser', action='store_true')
     args = ap.parse_args()
     PORT, HOST = args.port, args.host
