@@ -1,1 +1,1 @@
-web: python live_server.py --port $PORT --host 0.0.0.0 --no-browser
+web: bash start.sh
