@@ -14,8 +14,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from socketserver import ThreadingMixIn
 
-import pyodbc
-
 PORT = 8765
 HOST = "0.0.0.0"  # Bind to all interfaces for LAN + tunnel access
 ROOT = Path(__file__).parent.resolve()
@@ -58,6 +56,20 @@ def js(obj):
     return str(obj)
 
 def get_conn():
+    # Cloud mode: DWH creds from environment (self-hosted runner uses pymssql)
+    if os.environ.get("DWH_SERVER"):
+        import pymssql
+        return pymssql.connect(
+            server=os.environ["DWH_SERVER"],
+            port=int(os.environ.get("DWH_PORT", "1433")),
+            user=os.environ["DWH_USER"],
+            password=os.environ["DWH_PASSWORD"],
+            database="DWH",
+            timeout=120,
+            login_timeout=30,
+        )
+    # Local mode: ODBC driver
+    import pyodbc
     conn = pyodbc.connect(CONN_STR)
     conn.timeout = 120
     return conn
@@ -109,20 +121,20 @@ def get_report_data(report_date):
     conn = get_conn()
     c = conn.cursor()
 
-    # 1. GL 3010001 all SBUs
+    # 1. Revenue sub-schedule (net of returns; SBU 0 = unallocated cement -> ACCL 58)
     c.execute(f"""
-        SELECT j.intSBUId,
-          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{rd_str}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS daily,
-          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{(rd - timedelta(days=1)).strftime("%Y-%m-%d")}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS dod,
-          SUM(CASE WHEN j.dteTransactionDate>='{month_start}' AND j.dteTransactionDate<'{next_str}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS mtd,
-          SUM(CASE WHEN j.dteTransactionDate>='{prev_start}' AND j.dteTransactionDate<'{prev_end}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS mom,
-          SUM(CASE WHEN j.dteTransactionDate>='{yoy_start}' AND j.dteTransactionDate<'{yoy_end}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS yoy,
-          SUM(CASE WHEN j.dteTransactionDate>='{fy_start}' AND j.dteTransactionDate<'{next_str}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS fy_ytd,
-          SUM(CASE WHEN j.dteTransactionDate>='{cy_start}' AND j.dteTransactionDate<'{next_str}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS cy_ytd
+        SELECT CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END AS sbu,
+          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{rd_str}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS daily,
+          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{(rd - timedelta(days=1)).strftime("%Y-%m-%d")}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS dod,
+          SUM(CASE WHEN j.dteTransactionDate>='{month_start}' AND j.dteTransactionDate<'{next_str}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS mtd,
+          SUM(CASE WHEN j.dteTransactionDate>='{prev_start}' AND j.dteTransactionDate<'{prev_end}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS mom,
+          SUM(CASE WHEN j.dteTransactionDate>='{yoy_start}' AND j.dteTransactionDate<'{yoy_end}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS yoy,
+          SUM(CASE WHEN j.dteTransactionDate>='{fy_start}' AND j.dteTransactionDate<'{next_str}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS fy_ytd,
+          SUM(CASE WHEN j.dteTransactionDate>='{cy_start}' AND j.dteTransactionDate<'{next_str}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS cy_ytd
         FROM DWH.fin.tblAccountingJournalArc j
-        WHERE j.strGeneralLedgerCode='3010001' AND j.numAmount<0 AND j.isActive=1
+        WHERE j.strGeneralLedgerCode IN ('3010001','3010002','3010005','3010006') AND j.isActive=1
           AND j.intSBUId NOT IN (103,116,119,122,111)
-        GROUP BY j.intSBUId ORDER BY j.intSBUId
+        GROUP BY CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END ORDER BY sbu
     """)
     gl_rows = {row[0]: {
         'd': round(row[1], 6) if row[1] else 0,
@@ -134,15 +146,15 @@ def get_report_data(report_date):
         'cy': round(row[7], 6) if row[7] else 0,
     } for row in c.fetchall()}
 
-    # 2. GL 3010005 freight SBUs
+    # 2. GL 3010005 freight SBUs (net)
     c.execute(f"""
         SELECT j.intSBUId,
-          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{rd_str}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS daily,
-          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{(rd - timedelta(days=1)).strftime("%Y-%m-%d")}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS dod,
-          SUM(CASE WHEN j.dteTransactionDate>='{month_start}' AND j.dteTransactionDate<'{next_str}' THEN ABS(j.numAmount)/10000000.0 ELSE 0 END) AS mtd
+          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{rd_str}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS daily,
+          SUM(CASE WHEN CAST(j.dteTransactionDate AS DATE)='{(rd - timedelta(days=1)).strftime("%Y-%m-%d")}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS dod,
+          SUM(CASE WHEN j.dteTransactionDate>='{month_start}' AND j.dteTransactionDate<'{next_str}' THEN -j.numAmount/10000000.0 ELSE 0 END) AS mtd
         FROM DWH.fin.tblAccountingJournalArc j
-        WHERE j.strGeneralLedgerCode='3010005' AND j.numAmount<0 AND j.isActive=1
-          AND j.intSBUId IN (64,79,80,81,88)
+        WHERE j.strGeneralLedgerCode='3010005' AND j.isActive=1
+          AND j.intSBUId IN (64,79,80,81,88,110)
           AND j.dteTransactionDate>='{month_start}' AND j.dteTransactionDate<'{next_str}'
         GROUP BY j.intSBUId ORDER BY j.intSBUId
     """)
@@ -151,17 +163,23 @@ def get_report_data(report_date):
         fr_d[row[0]] = round(row[1], 6) if row[1] else 0
         fr_m[row[0]] = round(row[3], 6) if row[3] else 0
 
-    # 3. Reconciliation totals
-    c.execute(f"SELECT SUM(ABS(numAmount))/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010001' AND numAmount<0 AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
+    # 3. Reconciliation totals (net of returns)
+    c.execute(f"SELECT SUM(-numAmount)/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010001' AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
     g1all = round(c.fetchone()[0] or 0, 6)
 
-    c.execute(f"SELECT SUM(ABS(numAmount))/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010001' AND numAmount<0 AND isActive=1 AND intSBUId IN (103,116,119,122,111) AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
+    c.execute(f"SELECT SUM(-numAmount)/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010001' AND isActive=1 AND intSBUId IN (103,116,119,122,111) AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
     excl = round(c.fetchone()[0] or 0, 6)
 
-    c.execute(f"SELECT SUM(ABS(numAmount))/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010005' AND numAmount<0 AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
+    c.execute(f"SELECT SUM(-numAmount)/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010005' AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
     g5all = round(c.fetchone()[0] or 0, 6)
 
-    c.execute(f"SELECT SUM(ABS(numAmount))/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010004' AND numAmount<0 AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
+    c.execute(f"SELECT SUM(-numAmount)/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010002' AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
+    g2all = round(c.fetchone()[0] or 0, 6)
+
+    c.execute(f"SELECT SUM(-numAmount)/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010006' AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
+    g6all = round(c.fetchone()[0] or 0, 6)
+
+    c.execute(f"SELECT SUM(-numAmount)/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010004' AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
     g4all = round(c.fetchone()[0] or 0, 6)
 
     # 4. Daily volumes
@@ -216,33 +234,35 @@ def get_report_data(report_date):
     asphalt_ratio = round(asphalt_rev / total_del, 4) if total_del > 0 else 0.74
     benzol_ratio = round(benzol_rev / total_del, 4) if total_del > 0 else 0.26
 
-    # 8. Daily trends (GL 3010001)
+    # 8. Daily trends (GL revenue sub-schedule, net)
     c.execute(f"""
-        SELECT j.intSBUId, CAST(j.dteTransactionDate AS DATE) AS dt, SUM(ABS(j.numAmount))/10000000.0 AS daily_rev
+        SELECT CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END AS sbu, CAST(j.dteTransactionDate AS DATE) AS dt, SUM(-j.numAmount)/10000000.0 AS daily_rev
         FROM DWH.fin.tblAccountingJournalArc j
-        WHERE j.strGeneralLedgerCode='3010001' AND j.numAmount<0 AND j.isActive=1
+        WHERE j.strGeneralLedgerCode IN ('3010001','3010002','3010005','3010006') AND j.isActive=1
           AND j.dteTransactionDate>='{month_start}' AND j.dteTransactionDate<'{next_str}'
           AND j.intSBUId NOT IN (103,116,119,122,111)
-        GROUP BY j.intSBUId, CAST(j.dteTransactionDate AS DATE)
-        ORDER BY j.intSBUId, dt
+        GROUP BY CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END, CAST(j.dteTransactionDate AS DATE)
+        ORDER BY sbu, dt
     """)
     td = [{'d': str(row[1]), 's': row[0], 'v': round(row[2], 6)} for row in c.fetchall()]
 
-    # 9. Targets (from Google Sheets — static for now, can be made dynamic)
-    targets = {'AIL': 118.30, 'ACCL': 184.00, 'AEL': 147.83, 'ARMCL': 41.37, 'Orca': 1.10,
-               'AAFL': 114.36, 'Benzol': 2.61, 'ABSL_Asphalt': 8.99, 'ALEL': 19.73}
+    # 9. Targets (Aug-26 from Google Sheets Target_Input sheet, file 1kf-2lI17nMgHx2bXAvwwx9PWboZ09qFmKP7NCR5hX3A)
+    targets = {'AIL': 121.00, 'ACCL': 173.00, 'AEL': 180.00, 'ARMCL': 37.91, 'Orca': 1.10,
+               'AAFL': 103.80, 'Benzol': 2.61, 'ABSL_Asphalt': 8.99, 'ACL': 1.90, 'ALEL': 19.73,
+               'NTL': 45.75, 'APFIL': 22.17, 'AITL': 3.85, 'BPL': 6.00, 'BTL_Coal': 18.71,
+               'AEFL': 2.29, 'ABL': 2.32, 'AAIL': 4.53, 'DTL_Coal': 37.50}
 
     # 10. SBU Map
     sbu_map = {19: 'APFIL', 36: 'AEL', 58: 'ACCL', 64: 'ASLL', 69: 'ARMCL', 72: 'BTL_Coal',
                77: 'DTL_Coal', 79: 'AOCN', 80: 'ASLL-1', 81: 'AMTL', 82: 'iBOS', 83: 'BPL',
                84: 'AITL', 86: 'HRML', 87: 'FAL', 88: 'ASeLL', 91: 'NTL', 98: 'ABSL',
-               99: 'ACL', 102: 'AIL', 109: 'AAFL', 114: 'ALEL', 115: 'AAIL', 118: 'ATL',
+               99: 'ACL', 102: 'AIL', 109: 'AAFL', 110: 'ASeLLC', 114: 'ALEL', 115: 'AAIL', 118: 'ATL',
                120: 'AEFL', 123: 'AEL_Eng', 124: 'ABL', 126: 'Orca', 128: 'AMXL', 129: 'NJL', 132: 'AMPL'}
 
     conn.close()
 
     # Freight defaults
-    for sbu_id in [64, 79, 80, 81, 88]:
+    for sbu_id in [64, 79, 80, 81, 88, 110]:
         if sbu_id not in fr_d:
             fr_d[sbu_id] = 0
             fr_m[sbu_id] = 0
@@ -253,7 +273,7 @@ def get_report_data(report_date):
     rpt_gl1 = round(g1all - excl, 6)
     rpt_frt = round(sum(fr_m.values()), 6)
     rpt_tot = round(rpt_gl1 + rpt_frt, 6)
-    full_tot = round(g1all + g5all + g4all, 6)
+    full_tot = round(g1all + g5all + g2all + g6all + g4all, 6)
     gap = round(full_tot - rpt_tot, 6)
 
     month_pct = round(mf * 100, 1)
@@ -267,7 +287,7 @@ def get_report_data(report_date):
         'period': period, 'day_label': day_label,
         'gl': gl_rows, 'fr_d': fr_d, 'fr_m': fr_m,
         'dv': dv, 'mv': mv, 'mov': mov, 'td': td,
-        'g1all': g1all, 'excl': excl, 'g5all': g5all, 'g4all': g4all,
+        'g1all': g1all, 'excl': excl, 'g5all': g5all, 'g2all': g2all, 'g6all': g6all, 'g4all': g4all,
         'rpt_gl1': rpt_gl1, 'rpt_frt': rpt_frt, 'rpt_tot': rpt_tot,
         'full_tot': full_tot, 'gap': gap,
         'asphalt': asphalt_ratio, 'benzol': benzol_ratio,
@@ -289,11 +309,8 @@ def build_html(data):
     # Compute KPI totals
     total_daily = 0; total_mtd = 0; total_fy = 0; total_cy = 0; ach_list = []
     for sid, g in data['gl'].items():
-        fr_d = data['fr_d'].get(sid, 0)
-        fr_m = data['fr_m'].get(sid, 0)
-        is_freight = sid in (64, 79, 80, 81, 88)
-        daily = (g['d'] or 0) + (fr_d if is_freight else 0)
-        mtd = (g['m'] or 0) + (fr_m if is_freight else 0)
+        daily = (g['d'] or 0)
+        mtd = (g['m'] or 0)
         total_daily += daily; total_mtd += mtd
         total_fy += (g['fy'] or 0); total_cy += (g['cy'] or 0)
         # Ach% available from JS-side computation only — skip Python check
@@ -309,76 +326,93 @@ def build_html(data):
 <title>ARL Daily SBU Sales Flash Report — {title_date}</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}}
-#app{{padding:1.5rem 2rem;max-width:1400px;margin:0 auto}}
-#loading{{text-align:center;padding:3rem;color:#94a3b8;font-size:1rem}}
+body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;font-size:17px}}
+#app{{padding:1.5rem 2rem;max-width:1500px;margin:0 auto}}
+#loading{{text-align:center;padding:3rem;color:#94a3b8;font-size:1.15rem}}
 header{{border-bottom:1px solid #334155;padding-bottom:1rem;margin-bottom:1.5rem}}
-header h1{{font-size:1.4rem;color:#f8fafc}}
-header .meta{{color:#94a3b8;font-size:0.8rem;margin-top:0.25rem}}
-.kpi-row{{display:grid;grid-template-columns:repeat(6,1fr);gap:1rem;margin-bottom:1.5rem}}
-.kpi-card{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1rem;text-align:center}}
-.kpi-card .label{{color:#94a3b8;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05rem}}
-.kpi-card .val{{font-size:1.5rem;font-weight:700;color:#f8fafc;margin:0.3rem 0}}
-.kpi-card .sub{{font-size:0.72rem;color:#64748b}}
+header h1{{font-size:1.8rem;color:#f8fafc}}
+header .meta{{color:#94a3b8;font-size:1rem;margin-top:0.25rem}}
+.kpi-row{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-bottom:1.5rem}}
+.kpi-card{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1.1rem;text-align:center;transition:transform 0.2s,box-shadow 0.2s}}
+.kpi-card:hover{{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,0.4)}}
+.kpi-card .label{{color:#94a3b8;font-size:0.9rem;text-transform:uppercase;letter-spacing:0.05rem}}
+.kpi-card .val{{font-size:1.85rem;font-weight:700;color:#f8fafc;margin:0.3rem 0;animation:kpiPop 0.6s ease-out}}
+.kpi-card .sub{{font-size:0.9rem;color:#94a3b8}}
+@keyframes kpiPop{{0%{{transform:scale(0.92);opacity:0.4}}60%{{transform:scale(1.04)}}100%{{transform:scale(1);opacity:1}}}}
+@media (max-width:768px){{.kpi-row{{grid-template-columns:repeat(2,1fr)}}.charts-row{{grid-template-columns:1fr}}.insights-row{{grid-template-columns:1fr}}.summary-chart-box .canvas-row{{flex-direction:column;align-items:center}}.canvas-row canvas{{width:100%;height:auto}}.recon-grid{{grid-template-columns:1fr}}}}
+@media (max-width:480px){{.kpi-row{{grid-template-columns:1fr}}}}
 .charts-row{{display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:1.5rem}}
-.chart-box{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1rem}}
-.chart-box h3{{font-size:0.85rem;color:#94a3b8;margin-bottom:0.75rem;text-transform:uppercase}}
-.bar-wrap{{display:flex;flex-direction:column;gap:4px}}
+.chart-box{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1rem;box-shadow:0 4px 12px rgba(0,0,0,0.25);transition:box-shadow 0.2s}}
+.chart-box:hover{{box-shadow:0 6px 20px rgba(56,189,248,0.08)}}
+.chart-box h3{{font-size:1.05rem;color:#94a3b8;margin-bottom:0.75rem;text-transform:uppercase}}
+.bar-wrap{{display:flex;flex-direction:column;gap:5px}}
 .bar-item{{display:flex;align-items:center;gap:0.5rem}}
-.bar-item .lbl{{width:70px;font-size:0.7rem;text-align:right;color:#94a3b8;flex-shrink:0}}
-.bar-item .bar-bg{{flex:1;height:18px;background:#1e293b;border-radius:3px;overflow:hidden;position:relative}}
+.bar-item .lbl{{width:90px;font-size:0.9rem;text-align:right;color:#94a3b8;flex-shrink:0}}
+.bar-item .bar-bg{{flex:1;height:20px;background:#1e293b;border-radius:3px;overflow:hidden;position:relative}}
 .bar-item .bar-fill{{height:100%;border-radius:3px;transition:width 0.5s}}
-.bar-item .bar-val{{width:60px;font-size:0.7rem;color:#cbd5e1;flex-shrink:0;text-align:right}}
+.bar-item .bar-val{{width:80px;font-size:0.9rem;color:#cbd5e1;flex-shrink:0;text-align:right}}
 .insights-row{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1.5rem}}
 .insight-box{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1rem}}
-.insight-box h3{{font-size:0.8rem;color:#f8fafc;margin-bottom:0.75rem;padding-bottom:0.5rem;border-bottom:1px solid #334155}}
-.insight-box ul{{list-style:none;font-size:0.78rem;line-height:1.6}}
+.insight-box h3{{font-size:1rem;color:#f8fafc;margin-bottom:0.75rem;padding-bottom:0.5rem;border-bottom:1px solid #334155}}
+.insight-box ul{{list-style:none;font-size:0.95rem;line-height:1.6}}
 .insight-box li{{color:#cbd5e1;padding:0.2rem 0}}
 .insight-box li.neg{{color:#fca5a5}}
 .insight-box li.pos{{color:#86efac}}
 .recon-card{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1.5rem;margin-bottom:1.5rem}}
-.recon-card h3{{color:#38bdf8;margin-bottom:1rem;font-size:0.9rem}}
+.recon-card h3{{color:#38bdf8;margin-bottom:1rem;font-size:1.15rem}}
 .recon-grid{{display:grid;grid-template-columns:1fr 1fr;gap:2rem}}
-.recon-col h4{{color:#94a3b8;font-size:0.75rem;text-transform:uppercase;margin-bottom:0.75rem}}
-.recon-col table{{width:100%;font-size:0.82rem}}
-.recon-col td{{padding:0.3rem 0.5rem;color:#cbd5e1}}
+.recon-col h4{{color:#94a3b8;font-size:0.95rem;text-transform:uppercase;margin-bottom:0.75rem}}
+.recon-col table{{width:100%;font-size:1rem}}
+.recon-col td{{padding:0.35rem 0.5rem;color:#cbd5e1}}
 .recon-col .total td{{border-top:1px solid #475569;font-weight:700;color:#f8fafc}}
 .recon-col .val{{text-align:right;font-family:monospace}}
-.recon-note{{color:#fbbf24;font-size:0.75rem;margin-top:1rem;padding:0.5rem;background:#422006;border-radius:0.5rem}}
-.scorecard-table{{width:100%;border-collapse:collapse;font-size:0.78rem;background:#1e293b;border-radius:0.75rem;overflow:hidden;border:1px solid #334155}}
-.scorecard-table th{{background:#0f172a;color:#94a3b8;padding:0.6rem 0.5rem;text-align:left;font-weight:600;position:sticky;top:0;font-size:0.7rem;text-transform:uppercase}}
+.recon-note{{color:#fbbf24;font-size:0.95rem;margin-top:1rem;padding:0.6rem;background:#422006;border-radius:0.5rem}}
+.scorecard-table{{width:100%;border-collapse:collapse;font-size:0.98rem;background:#1e293b;border-radius:0.75rem;overflow:hidden;border:1px solid #334155}}
+.scorecard-table th{{background:#0f172a;color:#94a3b8;padding:0.6rem 0.5rem;text-align:left;font-weight:600;position:sticky;top:0;z-index:2;font-size:0.9rem;text-transform:uppercase}}
 .scorecard-table th.num{{text-align:right}}
-.scorecard-table td{{padding:0.45rem 0.5rem;border-bottom:1px solid #1e293b}}
-.scorecard-table tbody tr:hover{{background:#1e3a5f}}
+.scorecard-table td{{padding:0.55rem 0.6rem;border-bottom:1px solid #1e293b;transition:background 0.15s}}
+.scorecard-table tbody tr{{transition:box-shadow 0.15s}}
+.scorecard-table tbody tr:hover{{background:#1e3a5f;box-shadow:inset 3px 0 0 #38bdf8}}
+.scorecard-table tbody tr.top-performer{{background:#1a2f1a}}
+.scorecard-table tbody tr.top-performer:hover{{background:#1e3a2e;box-shadow:inset 3px 0 0 #4ade80}}
 .scorecard-table td.num{{text-align:right;font-family:monospace}}
+.scorecard-wrap{{overflow-x:auto;border-radius:0.75rem;margin-bottom:1.5rem;-webkit-overflow-scrolling:touch}}
+.scorecard-controls{{display:flex;gap:0.75rem;margin-bottom:0.75rem;align-items:center;flex-wrap:wrap}}
+.scorecard-controls select,.scorecard-controls input{{background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:0.5rem;padding:0.5rem 0.85rem;font-size:0.95rem}}
+.scorecard-controls select:focus,.scorecard-controls input:focus{{outline:none;border-color:#38bdf8}}
+.scorecard-controls input{{min-width:220px}}
+.scorecard-controls label{{color:#94a3b8;font-size:0.9rem;margin-right:0.25rem}}
+.chart-stats{{display:flex;gap:1rem;margin-bottom:0.75rem;font-size:0.9rem;color:#94a3b8;flex-wrap:wrap}}
+.chart-stats span{{background:#0f172a;padding:0.25rem 0.6rem;border-radius:0.35rem;border:1px solid #334155}}
+.chart-stats b{{color:#38bdf8}}
 .mom-up{{color:#4ade80}}
 .mom-down{{color:#f87171}}
 .mom-neu{{color:#fbbf24}}
-footer{{text-align:center;color:#475569;font-size:0.65rem;padding:1.5rem 0;border-top:1px solid #1e293b;margin-top:1.5rem}}
-.flag-card{{background:#451a03;border:1px solid #d97706;border-radius:0.75rem;padding:1rem;margin-bottom:1rem;font-size:0.78rem;color:#fcd34d}}
+footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;border-top:1px solid #1e293b;margin-top:1.5rem}}
+.flag-card{{background:#451a03;border:1px solid #d97706;border-radius:0.75rem;padding:1rem;margin-bottom:1rem;font-size:0.95rem;color:#fcd34d}}
 .flag-card b{{color:#fbbf24}}
 .vol-cell{{color:#7dd3fc}}
-.chart-toggle{{cursor:pointer;color:#38bdf8;font-size:0.65rem;display:inline-block;margin-left:0.3rem;transition:transform 0.2s}}
+.chart-toggle{{cursor:pointer;color:#38bdf8;font-size:0.85rem;display:inline-block;margin-left:0.3rem;transition:transform 0.2s}}
 .chart-toggle.open{{transform:rotate(90deg)}}
 .chart-row{{display:none}}
 .chart-row.open{{display:table-row}}
 .chart-row td{{padding:0;border:none;background:#0f172a}}
 .chart-canvas-wrap{{padding:0.75rem 1rem}}
-.chart-canvas-wrap canvas{{background:#1a2332;border-radius:0.5rem;border:1px solid #334155}}
-.summary-chart-box{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1rem;margin-bottom:1.5rem}}
-.summary-chart-box h3{{font-size:0.85rem;color:#94a3b8;margin-bottom:0.75rem;text-transform:uppercase}}
+.chart-canvas-wrap canvas{{background:#1a2332;border-radius:0.5rem;border:1px solid #334155;cursor:pointer}}
+.summary-chart-box{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1rem;margin-bottom:1.5rem;box-shadow:0 4px 12px rgba(0,0,0,0.25)}}
+.summary-chart-box h3{{font-size:1.05rem;color:#94a3b8;margin-bottom:0.75rem;text-transform:uppercase}}
 .summary-chart-box .canvas-row{{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center}}
-.summary-chart-box canvas{{background:#1a2332;border-radius:0.5rem;border:1px solid #334155}}
+.summary-chart-box canvas{{background:#1a2332;border-radius:0.5rem;border:1px solid #334155;cursor:crosshair}}
 #login-overlay{{position:fixed;inset:0;background:rgba(15,23,42,0.98);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column}}
 #login-overlay.hidden{{display:none}}
-#login-box{{background:#1e293b;padding:2.5rem;border-radius:1rem;border:1px solid #334155;width:360px;text-align:center}}
-#login-box h2{{color:#38bdf8;margin-bottom:0.5rem;font-size:1.25rem}}
-#login-box p{{color:#94a3b8;margin-bottom:1.5rem;font-size:0.85rem}}
-#login-box input{{width:100%;padding:0.75rem;margin:0.35rem 0;border-radius:0.5rem;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:0.95rem}}
+#login-box{{background:#1e293b;padding:2.5rem;border-radius:1rem;border:1px solid #334155;width:380px;text-align:center}}
+#login-box h2{{color:#38bdf8;margin-bottom:0.5rem;font-size:1.5rem}}
+#login-box p{{color:#94a3b8;margin-bottom:1.5rem;font-size:1rem}}
+#login-box input{{width:100%;padding:0.85rem;margin:0.35rem 0;border-radius:0.5rem;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:1.05rem}}
 #login-box input:focus{{outline:none;border-color:#38bdf8}}
-#login-box button{{width:100%;padding:0.75rem;margin-top:1rem;background:#38bdf8;color:#0f172a;border:none;border-radius:0.5rem;font-weight:700;font-size:1rem;cursor:pointer}}
-#login-box .err{{color:#f87171;margin-top:0.5rem;font-size:0.8rem}}
-#loading-overlay{{position:fixed;inset:0;background:rgba(15,23,42,0.95);z-index:9998;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#94a3b8;font-size:1.1rem}}
+#login-box button{{width:100%;padding:0.85rem;margin-top:1rem;background:#38bdf8;color:#0f172a;border:none;border-radius:0.5rem;font-weight:700;font-size:1.15rem;cursor:pointer}}
+#login-box .err{{color:#f87171;margin-top:0.5rem;font-size:0.95rem}}
+#loading-overlay{{position:fixed;inset:0;background:rgba(15,23,42,0.95);z-index:9998;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#94a3b8;font-size:1.25rem}}
 #loading-overlay.hidden{{display:none}}
 .spinner{{width:40px;height:40px;border:3px solid #334155;border-top:3px solid #38bdf8;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:1rem}}
 @keyframes spin{{to{{transform:rotate(360deg)}}}}
@@ -394,17 +428,18 @@ footer{{text-align:center;color:#475569;font-size:0.65rem;padding:1.5rem 0;borde
 <div id="app">
 <header>
 <h1>AKIJ RESOURCE — Daily SBU Sales Flash Report</h1>
-<div class="meta">Report Date: {date_str} | Period: {data['period']} (Day {data['day_label']}, {month_pct}%) | Source: DWH GL 3010001/3010005 | FY 2026-27 | Live</div>
+<div class="meta">Report Date: {date_str} | Period: {data['period']} (Day {data['day_label']}, {month_pct}%) | Source: DWH GL 3010001–3010006 (Revenue sub-schedule) | FY 2026-27 | Live</div>
 </header>
 
 <div class="flag-card">
-<b>Overrides Needed:</b> ABL (SBU 124) and Orca (SBU 126) have persistent gaps vs portal. ALEL (114), DTL_Coal (77), BPL (83) may also need verification. BTL_G2G dormant since Jul 2026.
+<b>Basis:</b> Revenue = net of sales returns (GL 3010001–3010006, credits − debits). Unallocated cement deliveries (intSBUId=0) mapped to ACCL (58). <b>Overrides still needed:</b> ABL (124) and Orca (126) have persistent gaps vs portal. BTL_G2G dormant since Jul 2026.
 </div>
 
 <div class="kpi-row" id="kpi-row"></div>
 
 <div class="summary-chart-box">
 <h3>Portfolio Daily Revenue Trend — {data['period']} (BDT Cr)</h3>
+<div class="chart-stats" id="portfolio-stats"></div>
 <div class="canvas-row">
 <canvas id="portfolio-daily" width="640" height="280"></canvas>
 <canvas id="top5-stacked" width="440" height="280"></canvas>
@@ -422,20 +457,22 @@ footer{{text-align:center;color:#475569;font-size:0.65rem;padding:1.5rem 0;borde
 <h3>Revenue Reconciliation — MTD {data['period']}</h3>
 <div class="recon-grid">
 <div class="recon-col">
-<h4>Our Report Total</h4>
+<h4>Our Report Total (sub-schedule)</h4>
 <table>
-<tr><td>GL 3010001 (Report SBU Scope)</td><td class="val" id="rpt-gross">—</td></tr>
-<tr><td style="font-size:0.7rem;color:#64748b;padding-left:1.5rem">All 3010001 report SBUs excl. recon (103,116,119,122,111)</td></tr>
-<tr><td>GL 3010005 (Freight — ASLL, AOCN, AMTL, ASeLL, ASLL-1)</td><td class="val" id="rpt-freight">—</td></tr>
+<tr><td>GL 3010001 Sales (Local)</td><td class="val" id="rpt-gross">—</td></tr>
+<tr><td style="font-size:0.9rem;color:#94a3b8;padding-left:1.5rem">Report SBUs excl. recon (103,116,119,122,111)</td></tr>
+<tr><td>GL 3010005 Freight (ASLL, AOCN, AMTL, ASeLL, ASLL-1, ASeLLC)</td><td class="val" id="rpt-freight">—</td></tr>
 <tr class="total"><td>Report Total</td><td class="val" id="rpt-total">—</td></tr>
 </table>
 </div>
 <div class="recon-col">
-<h4>Full GL Revenue</h4>
+<h4>Full GL Revenue (sub-schedule)</h4>
 <table>
-<tr><td>GL 3010001 (All Entities)</td><td class="val" id="full-3010001">—</td></tr>
-<tr><td>GL 3010005 (All Freight)</td><td class="val" id="full-3010005">—</td></tr>
-<tr><td>GL 3010004 (Export / Other)</td><td class="val" id="full-3010004">—</td></tr>
+<tr><td>GL 3010001 Sales (Local)</td><td class="val" id="full-3010001">—</td></tr>
+<tr><td>GL 3010002 Sales (Foreign)</td><td class="val" id="full-3010002">—</td></tr>
+<tr><td>GL 3010005 Freight Income</td><td class="val" id="full-3010005">—</td></tr>
+<tr><td>GL 3010006 Agency Income</td><td class="val" id="full-3010006">—</td></tr>
+<tr><td>GL 3010004 Other Income</td><td class="val" id="full-3010004">—</td></tr>
 <tr class="total"><td>Full GL Total</td><td class="val" id="full-total">—</td></tr>
 </table>
 </div>
@@ -443,6 +480,20 @@ footer{{text-align:center;color:#475569;font-size:0.65rem;padding:1.5rem 0;borde
 <div class="recon-note" id="recon-note"></div>
 </div>
 
+<div class="scorecard-controls">
+<label>Sort by:</label>
+<select id="scorecard-sort" onchange="sortScorecard()">
+<option value="mtd_rev">MTD Revenue (default)</option>
+<option value="daily_rev">Daily Revenue</option>
+<option value="code">SBU Code A–Z</option>
+<option value="mtd_ach_pct">Ach% High–Low</option>
+<option value="mom_pct">MoM% High–Low</option>
+<option value="yoy_pct">YoY% High–Low</option>
+<option value="proj_rev">Projected M/E</option>
+</select>
+<input type="text" id="scorecard-filter" placeholder="Filter SBUs..." oninput="filterScorecard()">
+</div>
+<div class="scorecard-wrap">
 <table class="scorecard-table">
 <thead>
 <tr>
@@ -452,7 +503,8 @@ footer{{text-align:center;color:#475569;font-size:0.65rem;padding:1.5rem 0;borde
 </thead>
 <tbody id="scorecard-body"></tbody>
 </table>
-<footer>Powered by ARL Live Flash Report Engine · DWH GL 3010001 (primary) + 3010005 (freight) · sms.tblDeliveryHeaderArc · Generated live on {date_str} · Next refresh: reload page</footer>
+</div>
+<footer>Powered by ARL Live Flash Report Engine · DWH GL 3010001–3010006 (Revenue sub-schedule) · sms.tblDeliveryHeaderArc · Generated live on {date_str} · Next refresh: reload page</footer>
 </div>
 
 <script>
@@ -476,8 +528,8 @@ const MV={js(data['mv'])};
 const MOV={js(data['mov'])};
 const GL={js(data['gl'])};
 const ABSL_ASPH={data['asphalt']}, ABSL_BENZ={data['benzol']};
-const FREIGHT_IDS=new Set([64,79,80,81,88]);
-const RECON={{g1all:{data['g1all']},excl:{data['excl']},g5all:{data['g5all']},g4all:{data['g4all']},
+const FREIGHT_IDS=new Set([64,79,80,81,88,110]);
+const RECON={{g1all:{data['g1all']},excl:{data['excl']},g5all:{data['g5all']},g2all:{data['g2all']},g6all:{data['g6all']},g4all:{data['g4all']},
   rpt_gl1:{data['rpt_gl1']},rpt_frt:{data['rpt_frt']},rpt_tot:{data['rpt_tot']},full_tot:{data['full_tot']},gap:{data['gap']}}};
 
 function fmt(n,d){{ if(n==null||isNaN(n)) return '—'; let s=n.toFixed(d||2); return s.replace(/\\B(?=(\\d{{3}})+(?!\\d))/g,',') }}
@@ -487,27 +539,19 @@ function momCls(v){{ if(v==null||isNaN(v)) return 'mom-neu'; if(v>=20) return 'm
 
 function buildSBU(id){{
   let g=GL[id], name=SBU_MAP[id], fr_d=FR_D[id]||0, fr_m=FR_M[id]||0;
-  let daily=(g?(g.d||0):0)+(FREIGHT_IDS.has(id)?fr_d:0);
-  let mtd=(g?(g.m||0):0)+(FREIGHT_IDS.has(id)?fr_m:0);
-  let dod=((g?g.dod:0)||0)+(FREIGHT_IDS.has(id)?fr_d:0);
+  let daily=(g?(g.d||0):0);
+  let mtd=(g?(g.m||0):0);
+  let dod=((g?g.dod:0)||0);
   let dv=DV[id]||0, mv=MV[id]||0, movv=MOV[id]||0;
   let has_vol=mv>0||!!DV[id];
   if(id===98){{ return [buildChannel(id,'ABSL Asphalt',ABSL_ASPH), buildChannel(id,'ABSL Benzol',ABSL_BENZ)]; }}
-  let moTgt=null;
-  if(name==='AIL') moTgt=MONTH_TARGETS['AIL']||null;
-  else if(name==='ACCL') moTgt=MONTH_TARGETS['ACCL']||null;
-  else if(name==='AEL') moTgt=MONTH_TARGETS['AEL']||null;
-  else if(name==='ARMCL') moTgt=MONTH_TARGETS['ARMCL']||null;
-  else if(name==='Orca') moTgt=MONTH_TARGETS['Orca']||null;
-  else if(name==='AAFL') moTgt=MONTH_TARGETS['AAFL']||null;
-  else if(name==='ALEL') moTgt=MONTH_TARGETS['ALEL']||null;
-  else if(name==='ACL') moTgt=MONTH_TARGETS['ACL']||null;
+  let moTgt=MONTH_TARGETS[name]||null;
   let mtdTgt=moTgt?(moTgt*M_FACTOR):null;
   let ach=(mtdTgt&&mtd>0)?(mtd/mtdTgt*100):null;
-  let momPct=(g?g.mom:0)>0?pct(mtd,(g?g.mom:0)/{dm}*DE):null;
-  let yoyPct=(g?g.yoy:0)>0?pct(mtd,(g?g.yoy:0)/{dm}*DE):null;
+  let momPct=(g?g.mom:0)>0?pct(mtd,(g?g.mom:0)):null;
+  let yoyPct=(g?g.yoy:0)>0?pct(mtd,(g?g.yoy:0)):null;
   let proj=mtd>0?(mtd/DE*DM):0;
-  return [{{id,code:name,name,src:'GL 3010001'+(FREIGHT_IDS.has(id)?' +3010005':''),
+  return [{{id,code:name,name,src:'GL 3010001-06',
     daily_rev:daily,dod_rev:dod,mtd_rev:mtd,mom_rev:(g?g.mom:0)||0,
     yoy_rev:(g?g.yoy:0)||0,fy_ytd_rev:(g?g.fy:0)||0,cy_ytd_rev:(g?g.cy:0)||0,
     daily_vol:dv,mtd_vol:mv,mom_vol:movv,has_vol:has_vol,
@@ -525,7 +569,7 @@ function buildChannel(id,name,ratio){{
   let mtdTgt=moTgt?moTgt*M_FACTOR:null;
   let ach=mtdTgt&&mtd>0?(mtd/mtdTgt*100):null;
   let proj=mtd>0?(mtd/DE*DM):0;
-  let momPct=mom>0?pct(mtd,mom/{dm}*DE):null;
+  let momPct=mom>0?pct(mtd,mom):null;
   return {{id,code:name,name,src:'GL 3010001',
     daily_rev:daily,dod_rev:dod,mtd_rev:mtd,mom_rev:mom,
     yoy_rev:yoy,fy_ytd_rev:fy,cy_ytd_rev:cy,
@@ -536,7 +580,7 @@ function buildChannel(id,name,ratio){{
 }}
 
 let ALL=[];
-let sortedIDs=[19,36,58,64,69,72,77,79,80,81,82,83,84,86,87,88,91,99,102,109,114,115,118,120,123,124,126,128,129,132];
+let sortedIDs=[19,36,58,64,69,72,77,79,80,81,82,83,84,86,87,88,91,99,102,109,110,114,115,118,120,123,124,126,128,129,132];
 for(let id of sortedIDs){{ let r=buildSBU(id); if(Array.isArray(r)) ALL.push(...r); else ALL.push(r); }}
 
 // KPI cards
@@ -545,7 +589,7 @@ ALL.forEach(r=>{{ totalDaily+=r.daily_rev;totalMTD+=r.mtd_rev;totalFY+=r.fy_ytd_
 let avgAch=achList.length?(achList.reduce((a,b)=>a+b)/achList.length):null;
 let projME=totalMTD>0?(totalMTD/DE*DM):0;
 let kpiHTML='';
-kpiHTML+=`<div class="kpi-card"><div class="label">Daily Revenue ({rd.strftime('%b')} {de})</div><div class="val">${{fmt(totalDaily)}} Cr</div><div class="sub">GL 3010001 + 3010005</div></div>`;
+kpiHTML+=`<div class="kpi-card"><div class="label">Daily Revenue ({rd.strftime('%b')} {de})</div><div class="val">${{fmt(totalDaily)}} Cr</div><div class="sub">GL 3010001–3010006</div></div>`;
 kpiHTML+=`<div class="kpi-card"><div class="label">MTD Revenue ({data['period']})</div><div class="val">${{fmt(totalMTD)}} Cr</div><div class="sub">${{DE}}/${{DM}} days (${{fmt(M_FACTOR*100,1)}}%)</div></div>`;
 kpiHTML+=`<div class="kpi-card"><div class="label">Projected Month-End</div><div class="val">${{fmt(projME)}} Cr</div><div class="sub">Run rate: ${{fmt(totalMTD/DE)}} Cr/day</div></div>`;
 kpiHTML+=`<div class="kpi-card"><div class="label">Avg MTD Achievement</div><div class="val">${{avgAch?fmt(avgAch,1)+'%':'N/A'}}</div><div class="sub">${{achList.length}} SBUs with targets</div></div>`;
@@ -578,7 +622,7 @@ document.getElementById('mom-chart').innerHTML=momHTML;
 let top3=[...ALL].filter(r=>r.mtd_rev>0).sort((a,b)=>b.mtd_rev-a.mtd_rev).slice(0,3);
 let bottom3=[...ALL].filter(r=>r.mtd_rev>0&&r.mtd_tgt_rev!=null).sort((a,b)=>a.mtd_ach_pct-b.mtd_ach_pct).slice(0,3);
 let riskSBUs=[...ALL].filter(r=>(r.momentum==='Negative'||r.momentum==='Weak')&&r.mtd_rev>0);
-let dormantSBUs=[...ALL].filter(r=>r.mtd_rev===0&&r.mtd_vol===0&&r.id!==64&&r.id!==79&&r.id!==80&&r.id!==81&&r.id!==88);
+let dormantSBUs=[...ALL].filter(r=>r.mtd_rev===0&&r.mtd_vol===0&&r.id!==64&&r.id!==79&&r.id!==80&&r.id!==81&&r.id!==88&&r.id!==110);
 let snapHTML='<div class="insight-box"><h3>Snapshot</h3><ul>';
 snapHTML+=`<li>Total MTD Revenue: <b>${{fmt(totalMTD)}} Cr</b> across ${{ALL.filter(r=>r.mtd_rev>0).length}} active SBUs</li>`;
 snapHTML+=`<li>Daily Revenue ({rd.strftime('%b')} {de}): <b>${{fmt(totalDaily)}} Cr</b></li>`;
@@ -608,17 +652,30 @@ document.getElementById('rpt-gross').textContent=fmt(RECON.rpt_gl1)+' Cr';
 document.getElementById('rpt-freight').textContent=fmt(RECON.rpt_frt)+' Cr';
 document.getElementById('rpt-total').textContent=fmt(RECON.rpt_tot)+' Cr';
 document.getElementById('full-3010001').textContent=fmt(RECON.g1all)+' Cr';
+document.getElementById('full-3010002').textContent=fmt(RECON.g2all)+' Cr';
 document.getElementById('full-3010005').textContent=fmt(RECON.g5all)+' Cr';
+document.getElementById('full-3010006').textContent=fmt(RECON.g6all)+' Cr';
 document.getElementById('full-3010004').textContent=fmt(RECON.g4all)+' Cr';
 document.getElementById('full-total').textContent=fmt(RECON.full_tot)+' Cr';
-document.getElementById('recon-note').textContent='Gap: '+fmt(RECON.gap)+' Cr. Right column includes recon-only entities (103,116,119,122,111: '+fmt(RECON.excl)+' Cr), non-report SBU entries, full-scope 3010005, and 3010004 export/other. ABL (124), Orca (126), and ALEL (114) still need portal verification.';
+document.getElementById('recon-note').textContent='Gap: '+fmt(RECON.gap)+' Cr. Report revenue = GL 3010001–3010006 (Sales Local/Foreign, Freight, Agency). Right column includes recon-only entities (103,116,119,122,111: '+fmt(RECON.excl)+' Cr), non-report SBU entries, full-scope 3010005, and 3010004 export/other. ABL (124), Orca (126), and ALEL (114) still need portal verification.';
 
 // Scorecard
-let tbodyHTML='';
-ALL.forEach((r,i)=>{{
-  let dodPct=r.dod_rev>0?pct(r.daily_rev,r.dod_rev):null;
-  tbodyHTML+=`<tr class="sbu-row" data-idx="${{i}}" data-sbu="${{r.id}}">
-<td>${{r.code}} <span style="font-size:0.65rem;color:#64748b">${{r.src}}</span> <span class="chart-toggle" data-idx="${{i}}">&#9654;</span></td>
+let top3IDs=new Set([...ALL].filter(r=>r.mtd_rev>0).sort((a,b)=>b.mtd_rev-a.mtd_rev).slice(0,3).map(r=>r.id));
+let SCORECARD_SORT='mtd_rev';
+let SCORECARD_FILTER='';
+function renderScorecard(){{
+  let sorted=[...ALL];
+  let sortBy=SCORECARD_SORT;
+  if(sortBy==='mtd_rev'||sortBy==='daily_rev'||sortBy==='proj_rev') sorted.sort((a,b)=>b[sortBy]-a[sortBy]);
+  else if(sortBy==='code') sorted.sort((a,b)=>a.code.localeCompare(b.code));
+  else sorted.sort((a,b)=>(b[sortBy]||0)-(a[sortBy]||0));
+  if(SCORECARD_FILTER){{ let q=SCORECARD_FILTER.toLowerCase(); sorted=sorted.filter(r=>r.code.toLowerCase().includes(q)); }}
+  let tbodyHTML='';
+  sorted.forEach((r,origIdx)=>{{
+    let dodPct=r.dod_rev>0?pct(r.daily_rev,r.dod_rev):null;
+    let topCls=top3IDs.has(r.id)?' top-performer':'',idx=ALL.indexOf(r);
+    tbodyHTML+=`<tr class="sbu-row${{topCls}}" data-idx="${{idx}}" data-sbu="${{r.id}}">
+<td>${{r.code}} <span style="font-size:0.85rem;color:#94a3b8">${{r.src}}</span> <span class="chart-toggle" data-idx="${{idx}}">&#9654;</span></td>
 <td class="num">${{fmt(r.daily_rev)}}</td>
 <td class="num ${{dodPct!=null&&dodPct>=0?'mom-up':dodPct!=null?'mom-down':''}}">${{dodPct!=null?fmt(dodPct,1)+'%':'—'}}</td>
 <td class="num">${{fmt(r.mtd_rev)}}</td>
@@ -633,21 +690,24 @@ ALL.forEach((r,i)=>{{
 <td class="num vol-cell">${{r.has_vol&&r.mtd_vol!=null?fmt(r.mtd_vol,1):'—'}}</td>
 <td class="num vol-cell">${{r.has_vol&&r.daily_vol!=null?fmt(r.daily_vol,1):'—'}}</td>
 <td></td></tr>
-<tr class="chart-row" id="cr-${{i}}"><td colspan="15"><div class="chart-canvas-wrap"><canvas id="c${{i}}" width="560" height="200"></canvas></div></td></tr>`;
-}});
-document.getElementById('scorecard-body').innerHTML=tbodyHTML;
-
-// Chart click handlers
-document.querySelectorAll('.chart-toggle').forEach(el=>{{
-  el.addEventListener('click',function(e){{ e.stopPropagation(); let idx=this.dataset.idx; let row=document.getElementById('cr-'+idx); let isOpen=row.classList.contains('open'); row.classList.toggle('open'); this.classList.toggle('open'); if(!isOpen) drawSBUChart(idx); }});
-}});
-document.querySelectorAll('.sbu-row').forEach(el=>{{
-  el.addEventListener('click',function(){{ let toggle=this.querySelector('.chart-toggle'); if(toggle) toggle.click(); }});
-}});
+<tr class="chart-row" id="cr-${{idx}}"><td colspan="15"><div class="chart-canvas-wrap"><canvas id="c${{idx}}" width="560" height="200"></canvas></div></td></tr>`;
+  }});
+  document.getElementById('scorecard-body').innerHTML=tbodyHTML;
+  // Re-bind chart toggle handlers
+  document.querySelectorAll('.chart-toggle').forEach(el=>{{
+    el.addEventListener('click',function(e){{ e.stopPropagation(); let idx=this.dataset.idx; let row=document.getElementById('cr-'+idx); let isOpen=row.classList.contains('open'); row.classList.toggle('open'); this.classList.toggle('open'); if(!isOpen) drawSBUChart(idx); }});
+  }});
+  document.querySelectorAll('.sbu-row').forEach(el=>{{
+    el.addEventListener('click',function(){{ let toggle=this.querySelector('.chart-toggle'); if(toggle) toggle.click(); }});
+  }});
+}}
+renderScorecard();
+function sortScorecard(){{ SCORECARD_SORT=document.getElementById('scorecard-sort').value; renderScorecard(); }}
+function filterScorecard(){{ SCORECARD_FILTER=document.getElementById('scorecard-filter').value; renderScorecard(); }}
 
 // === CHART FUNCTIONS ===
 function drawAxes(ctx,w,h,pad,ymax,xlabels,ylabel){{
-  ctx.strokeStyle='#334155';ctx.lineWidth=0.5;ctx.fillStyle='#94a3b8';ctx.font='9px monospace';
+  ctx.strokeStyle='#334155';ctx.lineWidth=0.5;ctx.fillStyle='#94a3b8';ctx.font='11px monospace';
   let cW=w-pad.left-pad.right,cH=h-pad.top-pad.bottom,ysteps=5;
   for(let i=0;i<=ysteps;i++){{ let y=pad.top+(cH/ysteps*i);ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(w-pad.right,y);ctx.stroke();ctx.fillText(fmt(ymax-(ymax/ysteps*i),1),2,y+3); }}
   xlabels.forEach((l,i)=>{{ ctx.fillText(l,pad.left+(cW/(xlabels.length-1)*i)-8,h-2); }});
@@ -657,25 +717,47 @@ function drawAxes(ctx,w,h,pad,ymax,xlabels,ylabel){{
 function drawPortfolioDaily(){{
   let c=document.getElementById('portfolio-daily');if(!c)return;
   let ctx=c.getContext('2d'),w=c.width,h=c.height,pad={{top:25,right:30,bottom:25,left:50}};
-  ctx.clearRect(0,0,w,h);
   let dtMap={{}};TD.forEach(t=>{{dtMap[t.d]=(dtMap[t.d]||0)+t.v;}});
   let dates=Object.keys(dtMap).sort(),vals=dates.map(d=>dtMap[d]);
   let ymax=Math.max(...vals)*1.2;
   let cW=w-pad.left-pad.right,cH=h-pad.top-pad.bottom;
   drawAxes(ctx,w,h,pad,ymax,dates.map(d=>d.slice(8)),'Cr');
   let barGap=4,barW=Math.max(6,cW/dates.length-barGap);
+  let bars=[]; // store for hover
   vals.forEach((v,i)=>{{
     let x=pad.left+(cW/(vals.length-1)*i)-barW/2,hb=(v/ymax*cH);
     let grad=ctx.createLinearGradient(0,pad.top+cH-hb,0,pad.top+cH);
     grad.addColorStop(0,'#38bdf8');grad.addColorStop(1,'#1d4ed8');
     ctx.fillStyle=grad;ctx.fillRect(x,pad.top+cH-hb,barW,hb);
-    ctx.fillStyle='#e2e8f0';ctx.font='7px monospace';ctx.fillText(fmt(v,2),x-4,pad.top+cH-hb-2);
+    ctx.fillStyle='#e2e8f0';ctx.font='10px monospace';ctx.fillText(fmt(v,2),x-4,pad.top+cH-hb-2);
+    bars.push({{x:x, w:barW, v:v, d:dates[i]}});
   }});
   let cum=0,cumVals=vals.map(v=>cum+=v);
   ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([4,3]);ctx.beginPath();
   cumVals.forEach((cv,i)=>{{ let x=pad.left+(cW/(cumVals.length-1)*i),y=pad.top+cH-(cv/Math.max(...cumVals)*1.1*cH);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y); }});
   ctx.stroke();ctx.setLineDash([]);
-  ctx.fillStyle='#fbbf24';ctx.font='8px monospace';ctx.fillText('MTD:'+fmt(cum,2),pad.left+cW-55,pad.top+10);
+  ctx.fillStyle='#fbbf24';ctx.font='10px monospace';ctx.fillText('MTD:'+fmt(cum,2),pad.left+cW-55,pad.top+10);
+  // Summary stats
+  let avgDaily=vals.reduce((a,b)=>a+b,0)/vals.length,peakDay=dates[vals.indexOf(Math.max(...vals))];
+  let trendDir='Stable',firstHalf=vals.slice(0,Math.floor(vals.length/2)).reduce((a,b)=>a+b,0);
+  let secondHalf=vals.slice(Math.ceil(vals.length/2)).reduce((a,b)=>a+b,0);
+  if(secondHalf>firstHalf*1.1) trendDir='Rising \u2191'; else if(firstHalf>secondHalf*1.1) trendDir='Dipping \u2193';
+  document.getElementById('portfolio-stats').innerHTML=`<span>Avg Daily: <b>${{fmt(avgDaily)}} Cr</b></span><span>Peak: <b>${{peakDay.slice(5)}} (${{fmt(Math.max(...vals))}} Cr)</b></span><span>Trend: <b>${{trendDir}}</b></span><span>Range: <b>${{fmt(Math.min(...vals))}}–${{fmt(Math.max(...vals))}} Cr</b></span>`;
+  // Hover tooltip
+  let tip=document.createElement('div');tip.id='pd-tip';tip.style.cssText='position:absolute;display:none;background:#0f172a;color:#e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;pointer-events:none;border:1px solid #38bdf8;white-space:nowrap;z-index:99';
+  let wrap=c.parentElement;if(wrap.style.position!=='relative') wrap.style.position='relative';wrap.appendChild(tip);
+  let oldHover=null;
+  c.onmousemove=function(e){{
+    let rect=c.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    let found=null;
+    bars.forEach(b=>{{if(mx>=b.x&&mx<=b.x+b.w&&my>=pad.top&&my<=pad.top+cH)found=b;}});
+    if(found){{
+      tip.style.display='block';tip.style.left=(e.clientX-rect.left+12)+'px';tip.style.top=(e.clientY-rect.top-22)+'px';
+      tip.textContent=found.d.slice(5)+': '+fmt(found.v,2)+' Cr';
+      if(oldHover!==found){{ c.style.cursor='pointer'; oldHover=found; }}
+    }}else{{ tip.style.display='none';oldHover=null;c.style.cursor='crosshair'; }}
+  }};
+  c.onmouseleave=function(){{ tip.style.display='none';oldHover=null; }};
 }}
 
 function drawTop5Stacked(){{
@@ -683,19 +765,33 @@ function drawTop5Stacked(){{
   let ctx=c.getContext('2d'),w=c.width,h=c.height,pad={{top:25,right:20,bottom:25,left:45}};
   ctx.clearRect(0,0,w,h);
   let byMTD=[...ALL].filter(r=>r.mtd_rev>0).sort((a,b)=>b.mtd_rev-a.mtd_rev).slice(0,5);
-  let colors=['#38bdf8','#818cf8','#a78bfa','#f472b6','#fbbf24'];
+  let colors=['#38bdf8','#818cf8','#c084fc','#f472b6','#fbbf24'];
   let dates=[...new Set(TD.map(t=>t.d))].sort();
   let cW=w-pad.left-pad.right,cH=h-pad.top-pad.bottom;
   let maxStack=0;
   dates.forEach(d=>{{ let stack=byMTD.reduce((s,r)=>s+(TD.filter(t=>t.d===d&&t.s===r.id).reduce((a,b)=>a+b.v,0)),0);maxStack=Math.max(maxStack,stack); }});
   maxStack*=1.15;
   drawAxes(ctx,w,h,pad,maxStack,dates.map(d=>d.slice(8)),'Cr');
-  byMTD.forEach((r,i)=>{{ ctx.fillStyle=colors[i];ctx.fillRect(w-130,8+i*14,10,10);ctx.fillStyle='#e2e8f0';ctx.font='9px sans-serif';ctx.fillText(r.code,w-116,17+i*14); }});
+  byMTD.forEach((r,i)=>{{ ctx.fillStyle=colors[i];ctx.fillRect(w-130,8+i*14,10,10);ctx.fillStyle='#e2e8f0';ctx.font='11px sans-serif';ctx.fillText(r.code,w-116,17+i*14); }});
   let barGap=3,barW=Math.max(8,cW/dates.length-barGap);
+  let segments=[]; // store for hover
   dates.forEach((d,di)=>{{
     let x=pad.left+(cW/(dates.length-1)*di)-barW/2,sy=pad.top+cH;
-    byMTD.forEach((r,si)=>{{ let v=TD.filter(t=>t.d===d&&t.s===r.id).reduce((a,b)=>a+b.v,0);sy-=(v/maxStack*cH);ctx.fillStyle=colors[si];ctx.fillRect(x,sy,barW,v/maxStack*cH); }});
+    byMTD.forEach((r,si)=>{{ let v=TD.filter(t=>t.d===d&&t.s===r.id).reduce((a,b)=>a+b.v,0);sy-=(v/maxStack*cH);ctx.fillStyle=colors[si];ctx.fillRect(x,sy,barW,v/maxStack*cH);segments.push({{x:x,w:barW,t:sy,h:v/maxStack*cH,sbu:r.code,v:v,di:di,si:si}}); }});
   }});
+  // Hover tooltip
+  let tip=document.createElement('div');tip.id='t5-tip';tip.style.cssText='position:absolute;display:none;background:#0f172a;color:#e2e8f0;padding:4px 8px;border-radius:4px;font-size:13px;pointer-events:none;border:1px solid #38bdf8;white-space:nowrap;z-index:99';
+  let wrap=c.parentElement;if(wrap.style.position!=='relative') wrap.style.position='relative';wrap.appendChild(tip);
+  c.onmousemove=function(e){{
+    let rect=c.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    let found=segments.filter(s=>mx>=s.x&&mx<=s.x+s.w&&my>=s.t&&my<=s.t+s.h).pop();
+    if(found){{
+      tip.style.display='block';tip.style.left=(e.clientX-rect.left+12)+'px';tip.style.top=(e.clientY-rect.top-22)+'px';
+      tip.textContent=found.sbu+': '+fmt(found.v,2)+' Cr';
+      c.style.cursor='pointer';
+    }}else{{ tip.style.display='none';c.style.cursor='crosshair'; }}
+  }};
+  c.onmouseleave=function(){{ tip.style.display='none'; }};
 }}
 
 function drawSBUChart(idx){{
@@ -703,18 +799,29 @@ function drawSBUChart(idx){{
   let ctx=c.getContext('2d'),w=c.width,h=c.height,pad={{top:20,right:30,bottom:22,left:50}};
   ctx.clearRect(0,0,w,h);
   let days=TD.filter(t=>t.s===r.id);
-  if(!days.length){{ctx.fillStyle='#64748b';ctx.font='11px sans-serif';ctx.fillText('No daily data for '+r.code,20,40);return;}}
+  if(!days.length){{ctx.fillStyle='#64748b';ctx.font='13px sans-serif';ctx.fillText('No daily data for '+r.code,20,40);return;}}
   let dates=[...new Set(days.map(t=>t.d))].sort(),vals=dates.map(d=>days.filter(t=>t.d===d).reduce((a,b)=>a+b.v,0));
   let ymax=Math.max(...vals)*1.3||1,cW=w-pad.left-pad.right,cH=h-pad.top-pad.bottom;
-  ctx.fillStyle='#f8fafc';ctx.font='bold 11px sans-serif';ctx.fillText(r.code+' Daily Revenue Trend (Cr)',pad.left,pad.top-5);
+  ctx.fillStyle='#f8fafc';ctx.font='bold 13px sans-serif';ctx.fillText(r.code+' Daily Revenue Trend (Cr) — Click bars for values',pad.left,pad.top-5);
   drawAxes(ctx,w,h,pad,ymax,dates.map(d=>d.slice(8)),'');
   let barGap=3,barW=Math.max(8,cW/dates.length-barGap);
-  vals.forEach((v,i)=>{{ let x=pad.left+(cW/(vals.length-1)*i)-barW/2,hb=(v/ymax*cH);ctx.fillStyle=i===vals.length-1?'#38bdf8':'#2563eb';ctx.fillRect(x,pad.top+cH-hb,barW,hb);ctx.fillStyle='#e2e8f0';ctx.font='7px monospace';ctx.fillText(fmt(v,2),x-3,pad.top+cH-hb-2); }});
+  let sbuBars=[];
+  let palette=['#38bdf8','#818cf8','#c084fc','#f472b6','#fbbf24','#4ade80','#fb923c'];
+  vals.forEach((v,i)=>{{ let x=pad.left+(cW/(vals.length-1)*i)-barW/2,hb=(v/ymax*cH);let clr=palette[i%palette.length];ctx.fillStyle=i===vals.length-1?'#38bdf8':clr;ctx.fillRect(x,pad.top+cH-hb,barW,hb);ctx.fillStyle='#e2e8f0';ctx.font='10px monospace';ctx.fillText(fmt(v,2),x-3,pad.top+cH-hb-2);sbuBars.push({{x:x,w:barW,v:v,d:dates[i]}}); }});
   let cum=0,cumVals=vals.map(v=>cum+=v);
   ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([4,3]);ctx.beginPath();
   cumVals.forEach((cv,i)=>{{ ctx.lineTo(pad.left+(cW/(cumVals.length-1)*i),pad.top+cH-(cv/Math.max(...cumVals)*1.15*cH)); }});
-  ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#fbbf24';ctx.font='8px monospace';ctx.fillText('MTD:'+fmt(cum,2),pad.left+cW-55,pad.top+10);
-  if(r.mtd_tgt_rev!=null){{ let tY=pad.top+cH-((r.mtd_tgt_rev/DE)/ymax*cH);ctx.strokeStyle='#f87171';ctx.lineWidth=1;ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(pad.left,tY);ctx.lineTo(pad.left+cW,tY);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#f87171';ctx.font='8px monospace';ctx.fillText('Tgt/day:'+fmt(r.mtd_tgt_rev/DE,2),pad.left,tY-3); }}
+  ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#fbbf24';ctx.font='10px monospace';ctx.fillText('MTD:'+fmt(cum,2),pad.left+cW-55,pad.top+10);
+  if(r.mtd_tgt_rev!=null){{ let tY=pad.top+cH-((r.mtd_tgt_rev/DE)/ymax*cH);ctx.strokeStyle='#f87171';ctx.lineWidth=1;ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(pad.left,tY);ctx.lineTo(pad.left+cW,tY);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#f87171';ctx.font='10px monospace';ctx.fillText('Tgt/day:'+fmt(r.mtd_tgt_rev/DE,2),pad.left,tY-3); }}
+  // Click to show value
+  c.onclick=function(e){{
+    let rect=c.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+    let found=sbuBars.find(b=>mx>=b.x&&mx<=b.x+b.w&&my>=pad.top&&my<=pad.top+cH);
+    if(found){{ let old=c.dataset.selected; if(old==found.d){{ delete c.dataset.selected;ctx.clearRect(0,0,w,h);drawSBUChart(idx);return; }}
+      c.dataset.selected=found.d;ctx.save();ctx.fillStyle='#fbbf24';ctx.font='bold 11px sans-serif';
+      ctx.fillText(found.d.slice(5)+': '+fmt(found.v,2)+' Cr',found.x+found.w/2-30,pad.top+cH-(found.v/ymax*cH)-10);ctx.restore();
+    }}
+  }};
 }}
 
 window.addEventListener('load',function(){{ drawPortfolioDaily(); drawTop5Stacked(); document.getElementById('loading-overlay').classList.add('hidden'); }});
