@@ -112,9 +112,9 @@ def get_report_data(report_date):
     next_str = (rd + timedelta(days=1)).strftime("%Y-%m-%d")
     month_start = rd.strftime("%Y-%m-01")
     prev_start = f"{prev_year}-{prev_month:02d}-01"
-    prev_end = f"{prev_year}-{prev_month:02d}-{de+1:02d}"
+    prev_end = (date(prev_year, prev_month, 1) + timedelta(days=de)).strftime("%Y-%m-%d")
     yoy_start = f"{yoy_year}-{rd.month:02d}-01"
-    yoy_end = f"{yoy_year}-{rd.month:02d}-{de+1:02d}"
+    yoy_end = (date(yoy_year, rd.month, 1) + timedelta(days=de)).strftime("%Y-%m-%d")
     fy_start = f"{fy_year}-07-01"
     cy_start = f"{rd.year}-01-01"
 
