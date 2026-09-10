@@ -137,13 +137,13 @@ def get_report_data(report_date):
         GROUP BY CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END ORDER BY sbu
     """)
     gl_rows = {row[0]: {
-        'd': round(row[1], 6) if row[1] else 0,
-        'dod': round(row[2], 6) if row[2] else 0,
-        'm': round(row[3], 6) if row[3] else 0,
-        'mom': round(row[4], 6) if row[4] else 0,
-        'yoy': round(row[5], 6) if row[5] else 0,
-        'fy': round(row[6], 6) if row[6] else 0,
-        'cy': round(row[7], 6) if row[7] else 0,
+        'd': round(float(row[1]), 6) if row[1] else 0.0,
+        'dod': round(float(row[2]), 6) if row[2] else 0.0,
+        'm': round(float(row[3]), 6) if row[3] else 0.0,
+        'mom': round(float(row[4]), 6) if row[4] else 0.0,
+        'yoy': round(float(row[5]), 6) if row[5] else 0.0,
+        'fy': round(float(row[6]), 6) if row[6] else 0.0,
+        'cy': round(float(row[7]), 6) if row[7] else 0.0,
     } for row in c.fetchall()}
 
     # 2. GL 3010005 freight SBUs (net)
@@ -160,8 +160,8 @@ def get_report_data(report_date):
     """)
     fr_d = {}; fr_m = {}
     for row in c.fetchall():
-        fr_d[row[0]] = round(row[1], 6) if row[1] else 0
-        fr_m[row[0]] = round(row[3], 6) if row[3] else 0
+        fr_d[row[0]] = round(float(row[1]), 6) if row[1] else 0.0
+        fr_m[row[0]] = round(float(row[3]), 6) if row[3] else 0.0
 
     # 3. Reconciliation totals (net of returns)
     c.execute(f"SELECT SUM(-numAmount)/10000000.0 FROM DWH.fin.tblAccountingJournalArc WHERE strGeneralLedgerCode='3010001' AND isActive=1 AND dteTransactionDate>='{month_start}' AND dteTransactionDate<'{next_str}'")
@@ -269,11 +269,30 @@ def get_report_data(report_date):
         if sbu_id not in gl_rows:
             gl_rows[sbu_id] = {'d': 0, 'dod': 0, 'm': 0, 'mom': 0, 'yoy': 0, 'fy': 0, 'cy': 0}
 
+    # FX conversion for foreign-currency shipping SBUs (book in USD/AED, must be BDT in report):
+    #   ASLL-1 (80)  = AKIJ SHIPPING LINES PTE LTD, SINGAPORE  -> USD -> BDT x 122.50
+    #   ASeLLC (110) = AKIJ SEA LINE SHIP MANAGEMENT L.L.C    -> AED -> BDT x 34.00
+    FX_RATES = {80: 122.50, 110: 34.00}
+    fx_extra = 0.0  # extra BDT to add to full-GL freight total so reconciliation stays consistent
+    for _sbu, _rate in FX_RATES.items():
+        _g = gl_rows.get(_sbu)
+        if _g:
+            for _k in ('d', 'dod', 'm', 'mom', 'yoy', 'fy', 'cy'):
+                _g[_k] = round(float(_g[_k] or 0) * _rate, 6)
+        _raw_m = float(fr_m.get(_sbu, 0) or 0)
+        fr_d[_sbu] = round(float(fr_d.get(_sbu, 0) or 0) * _rate, 6)
+        fr_m[_sbu] = round(_raw_m * _rate, 6)
+        fx_extra += _raw_m * (_rate - 1)
+        for _t in td:
+            if _t['s'] == _sbu:
+                _t['v'] = round(float(_t['v'] or 0) * _rate, 6)
+    g5all = round(float(g5all) + fx_extra, 6)
+
     # Compute reconciliation
-    rpt_gl1 = round(g1all - excl, 6)
-    rpt_frt = round(sum(fr_m.values()), 6)
+    rpt_gl1 = round(float(g1all) - float(excl), 6)
+    rpt_frt = round(sum(float(v) for v in fr_m.values()), 6)
     rpt_tot = round(rpt_gl1 + rpt_frt, 6)
-    full_tot = round(g1all + g5all + g2all + g6all + g4all, 6)
+    full_tot = round(float(g1all) + float(g5all) + float(g2all) + float(g6all) + float(g4all), 6)
     gap = round(full_tot - rpt_tot, 6)
 
     month_pct = round(mf * 100, 1)
