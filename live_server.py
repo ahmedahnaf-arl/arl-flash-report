@@ -46,7 +46,7 @@ def js_sig(v):
 
 def js(obj):
     if isinstance(obj, dict):
-        return "{" + ",".join(f"{k}:{js(v)}" for k, v in obj.items()) + "}"
+        return "{" + ",".join(f"{js(k)}:{js(v)}" for k, v in obj.items()) + "}"
     if isinstance(obj, list):
         return "[" + ",".join(js(i) for i in obj) + "]"
     if isinstance(obj, str):
@@ -246,7 +246,39 @@ def get_report_data(report_date):
     """)
     td = [{'d': str(row[1]), 's': row[0], 'v': round(row[2], 6)} for row in c.fetchall()]
 
-    # 9. Targets (Aug-26 from Google Sheets Target_Input sheet, file 1kf-2lI17nMgHx2bXAvwwx9PWboZ09qFmKP7NCR5hX3A)
+    # 8b. Daily revenue in BDT (actual, for expanded detail table)
+    c.execute(f"""
+        SELECT CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END AS sbu, CAST(j.dteTransactionDate AS DATE) AS dt, SUM(-j.numAmount) AS daily_rev_bdt
+        FROM DWH.fin.tblAccountingJournalArc j
+        WHERE j.strGeneralLedgerCode IN ('3010001','3010002','3010005','3010006') AND j.isActive=1
+          AND j.dteTransactionDate>='{month_start}' AND j.dteTransactionDate<'{next_str}'
+          AND j.intSBUId NOT IN (103,116,119,122,111)
+        GROUP BY CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END, CAST(j.dteTransactionDate AS DATE)
+        ORDER BY sbu, dt
+    """)
+    td_bdt = {}
+    for row in c.fetchall():
+        td_bdt.setdefault(row[0], {})[str(row[1])] = float(row[2] or 0)
+
+    # 8c. Sales order counts (number of orders, actual)
+    c.execute(f"""
+        SELECT CASE WHEN intSUBID=0 THEN 58 ELSE intSUBID END AS sbu, CAST(dteSalesOrderDate AS DATE) AS d, COUNT(*) AS orders
+        FROM DWH.oms.tblSalesOrderHeaderArc
+        WHERE dteSalesOrderDate >= '{month_start}' AND dteSalesOrderDate < '{next_str}'
+          AND intSUBID NOT IN (103,116,119,122,111) AND isActive = 1
+        GROUP BY CASE WHEN intSUBID=0 THEN 58 ELSE intSUBID END, CAST(dteSalesOrderDate AS DATE)
+        ORDER BY sbu, d
+    """)
+    ord_td = [{'d': str(row[1]), 's': row[0], 'c': int(row[2])} for row in c.fetchall()]
+    ord_mtd = {}
+    ord_daily = {}
+    for _t in ord_td:
+        _s = _t['s']
+        ord_mtd[_s] = ord_mtd.get(_s, 0) + _t['c']
+        if _t['d'] == rd_str:
+            ord_daily[_s] = ord_daily.get(_s, 0) + _t['c']
+
+    # 9. Targets (Sep-26 from Google Sheets forecast, column H "Forecasted Revenue Sept. 2026")
     targets = {'APFIL': 21.09, 'AEL': 129.50, 'ACCL': 182.11, 'ARMCL': 45.02,
                'BTL_Coal': 0.0, 'DTL_Coal': 56.87, 'iBOS': 2.52, 'BPL': 6.50,
                'AITL': 1.25, 'NTL': 50.87, 'ABSL_Asphalt': 9.09, 'Benzol': 2.55,
@@ -288,6 +320,9 @@ def get_report_data(report_date):
         for _t in td:
             if _t['s'] == _sbu:
                 _t['v'] = round(float(_t['v'] or 0) * _rate, 6)
+        if _sbu in td_bdt:
+            for _d in td_bdt[_sbu]:
+                td_bdt[_sbu][_d] = round(td_bdt[_sbu][_d] * _rate, 2)
     g5all = round(float(g5all) + fx_extra, 6)
 
     # Compute reconciliation
@@ -308,6 +343,7 @@ def get_report_data(report_date):
         'period': period, 'day_label': day_label,
         'gl': gl_rows, 'fr_d': fr_d, 'fr_m': fr_m,
         'dv': dv, 'mv': mv, 'mov': mov, 'td': td,
+        'td_bdt': td_bdt, 'ord_td': ord_td, 'ord_mtd': ord_mtd, 'ord_daily': ord_daily,
         'g1all': g1all, 'excl': excl, 'g5all': g5all, 'g2all': g2all, 'g6all': g6all, 'g4all': g4all,
         'rpt_gl1': rpt_gl1, 'rpt_frt': rpt_frt, 'rpt_tot': rpt_tot,
         'full_tot': full_tot, 'gap': gap,
@@ -326,6 +362,10 @@ def build_html(data):
 
     # Format trend data as JS
     td_js = js(data['td'])
+    td_bdt_js = js(data['td_bdt'])
+    ord_td_js = js(data['ord_td'])
+    ord_mtd_js = js(data['ord_mtd'])
+    ord_daily_js = js(data['ord_daily'])
 
     # Compute KPI totals
     total_daily = 0; total_mtd = 0; total_fy = 0; total_cy = 0; ach_list = []
@@ -420,6 +460,19 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 .chart-row td{{padding:0;border:none;background:#0f172a}}
 .chart-canvas-wrap{{padding:0.75rem 1rem}}
 .chart-canvas-wrap canvas{{background:#1a2332;border-radius:0.5rem;border:1px solid #334155;cursor:pointer}}
+.sbu-detail{{padding:0 1rem 0.75rem 1rem}}
+.sbu-detail-summary{{display:flex;gap:0.75rem;flex-wrap:wrap;margin:0.5rem 0}}
+.sbu-detail-summary span{{background:#1e293b;border:1px solid #334155;border-radius:0.4rem;padding:0.35rem 0.7rem;font-size:0.85rem;color:#cbd5e1}}
+.sbu-detail-summary b{{color:#38bdf8}}
+.sbu-detail-table{{overflow-x:auto;border:1px solid #334155;border-radius:0.5rem;background:#1e293b}}
+.sbu-detail-table table{{width:100%;border-collapse:collapse;font-size:0.88rem}}
+.sbu-detail-table th{{background:#0f172a;color:#94a3b8;padding:0.4rem 0.6rem;text-align:left;font-weight:600;font-size:0.78rem;text-transform:uppercase;position:sticky;top:0}}
+.sbu-detail-table th.num{{text-align:right}}
+.sbu-detail-table td{{padding:0.3rem 0.6rem;border-top:1px solid #1e293b;text-align:left}}
+.sbu-detail-table td.num{{text-align:right;font-family:monospace}}
+.sbu-detail-table td.rev{{color:#4ade80}}
+.sbu-detail-table tfoot td{{background:#0f172a;font-weight:700;color:#f8fafc;border-top:2px solid #334155}}
+.sbu-detail-table tfoot td.num{{font-family:monospace}}
 .summary-chart-box{{background:#1e293b;border:1px solid #334155;border-radius:0.75rem;padding:1rem;margin-bottom:1.5rem;box-shadow:0 4px 12px rgba(0,0,0,0.25)}}
 .summary-chart-box h3{{font-size:1.05rem;color:#94a3b8;margin-bottom:0.75rem;text-transform:uppercase}}
 .summary-chart-box .canvas-row{{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center}}
@@ -543,6 +596,10 @@ const M_FACTOR={mf};
 const SBU_MAP={js(data['sbu_map'])};
 const MONTH_TARGETS={js(data['targets'])};
 const TD={td_js};
+const TD_BDT={td_bdt_js};
+const ORD_TD={ord_td_js};
+const ORD_MTD={ord_mtd_js};
+const ORD_DAILY={ord_daily_js};
 const FR_D={js(data['fr_d'])};
 const FR_M={js(data['fr_m'])};
 const DV={js(data['dv'])};
@@ -713,12 +770,12 @@ function renderScorecard(){{
 <td class="num vol-cell">${{r.has_vol&&r.mtd_vol!=null?fmt(r.mtd_vol,1):'—'}}</td>
 <td class="num vol-cell">${{r.has_vol&&r.daily_vol!=null?fmt(r.daily_vol,1):'—'}}</td>
 <td></td></tr>
-<tr class="chart-row" id="cr-${{idx}}"><td colspan="16"><div class="chart-canvas-wrap"><canvas id="c${{idx}}" width="560" height="200"></canvas></div></td></tr>`;
+<tr class="chart-row" id="cr-${{idx}}"><td colspan="16"><div class="chart-canvas-wrap"><canvas id="c${{idx}}" width="560" height="200"></canvas></div><div class="sbu-detail" id="sd-${{idx}}"></div></td></tr>`;
   }});
   document.getElementById('scorecard-body').innerHTML=tbodyHTML;
   // Re-bind chart toggle handlers
   document.querySelectorAll('.chart-toggle').forEach(el=>{{
-    el.addEventListener('click',function(e){{ e.stopPropagation(); let idx=this.dataset.idx; let row=document.getElementById('cr-'+idx); let isOpen=row.classList.contains('open'); row.classList.toggle('open'); this.classList.toggle('open'); if(!isOpen) drawSBUChart(idx); }});
+    el.addEventListener('click',function(e){{ e.stopPropagation(); let idx=this.dataset.idx; let row=document.getElementById('cr-'+idx); let isOpen=row.classList.contains('open'); row.classList.toggle('open'); this.classList.toggle('open'); if(!isOpen){{ drawSBUChart(idx); drawSBUDetail(idx); }} }});
   }});
   document.querySelectorAll('.sbu-row').forEach(el=>{{
     el.addEventListener('click',function(){{ let toggle=this.querySelector('.chart-toggle'); if(toggle) toggle.click(); }});
@@ -845,6 +902,42 @@ function drawSBUChart(idx){{
       ctx.fillText(found.d.slice(5)+': '+fmt(found.v,2)+' Cr',found.x+found.w/2-30,pad.top+cH-(found.v/ymax*cH)-10);ctx.restore();
     }}
   }};
+}}
+
+function drawSBUDetail(idx){{
+  let r=ALL[idx],el=document.getElementById('sd-'+idx);
+  if(!el||!r)return;
+  let sbu=r.id;
+  let bdtMap=TD_BDT[sbu]||{{}};
+  let ordMap={{}};
+  ORD_TD.forEach(t=>{{ if(t.s===sbu) ordMap[t.d]=(ordMap[t.d]||0)+t.c; }});
+  let dates=[...new Set([...Object.keys(bdtMap),...Object.keys(ordMap)])].sort();
+  let moTgt=r.mo_tgt_rev;
+  let dayTgtBdt = moTgt!=null ? moTgt*10000000/DM : null;
+  let moTgtBdt = moTgt!=null ? moTgt*10000000 : null;
+  let dailyOrders=ORD_DAILY[sbu]||0;
+  let mtdOrders=ORD_MTD[sbu]||0;
+  let bdt=n=>Math.round(n).toLocaleString('en-US');
+  let sumRev=0,sumOrd=0;
+  let rows='';
+  dates.forEach(d=>{{
+    let rev=bdtMap[d]||0, ord=ordMap[d]||0;
+    sumRev+=rev; sumOrd+=ord;
+    rows+=`<tr><td>${{d.slice(5)}}</td><td class="num rev">${{bdt(rev)}}</td><td class="num">${{ord.toLocaleString('en-US')}}</td><td class="num">${{dayTgtBdt!=null?bdt(dayTgtBdt):'—'}}</td></tr>`;
+  }});
+  let sumTgt = dayTgtBdt!=null ? dayTgtBdt*dates.length : null;
+  el.innerHTML=`
+    <div class="sbu-detail-summary">
+      <span>Daily Orders: <b>${{dailyOrders.toLocaleString('en-US')}}</b></span>
+      <span>MTD Orders: <b>${{mtdOrders.toLocaleString('en-US')}}</b></span>
+      <span>Daily Rev Target: <b>${{dayTgtBdt!=null?bdt(dayTgtBdt)+' BDT':'—'}}</b></span>
+      <span>Monthly Rev Target: <b>${{moTgtBdt!=null?bdt(moTgtBdt)+' BDT':'—'}}</b></span>
+    </div>
+    <div class="sbu-detail-table"><table>
+      <thead><tr><th>Date</th><th class="num">Revenue (BDT)</th><th class="num">Orders</th><th class="num">Rev Target (BDT)</th></tr></thead>
+      <tbody>${{rows}}</tbody>
+      <tfoot><tr><td>Total</td><td class="num rev">${{bdt(sumRev)}}</td><td class="num">${{sumOrd.toLocaleString('en-US')}}</td><td class="num">${{sumTgt!=null?bdt(sumTgt):'—'}}</td></tr></tfoot>
+    </table></div>`;
 }}
 
 window.addEventListener('load',function(){{ drawPortfolioDaily(); drawTop5Stacked(); document.getElementById('loading-overlay').classList.add('hidden'); }});
