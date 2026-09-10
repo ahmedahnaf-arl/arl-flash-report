@@ -247,10 +247,12 @@ def get_report_data(report_date):
     td = [{'d': str(row[1]), 's': row[0], 'v': round(row[2], 6)} for row in c.fetchall()]
 
     # 9. Targets (Aug-26 from Google Sheets Target_Input sheet, file 1kf-2lI17nMgHx2bXAvwwx9PWboZ09qFmKP7NCR5hX3A)
-    targets = {'AIL': 121.00, 'ACCL': 173.00, 'AEL': 180.00, 'ARMCL': 37.91, 'Orca': 1.10,
-               'AAFL': 103.80, 'Benzol': 2.61, 'ABSL_Asphalt': 8.99, 'ACL': 1.90, 'ALEL': 19.73,
-               'NTL': 45.75, 'APFIL': 22.17, 'AITL': 3.85, 'BPL': 6.00, 'BTL_Coal': 18.71,
-               'AEFL': 2.29, 'ABL': 2.32, 'AAIL': 4.53, 'DTL_Coal': 37.50}
+    targets = {'APFIL': 21.09, 'AEL': 129.50, 'ACCL': 182.11, 'ARMCL': 45.02,
+               'BTL_Coal': 0.0, 'DTL_Coal': 56.87, 'iBOS': 2.52, 'BPL': 6.50,
+               'AITL': 1.25, 'NTL': 50.87, 'ABSL_Asphalt': 9.09, 'Benzol': 2.55,
+               'ACL': 8.42, 'AIL': 127.17, 'AAFL': 111.00, 'ALEL': 20.95,
+               'AAIL': 4.99, 'ATL': 1.50, 'AEFL': 2.85, 'ABL': 2.03,
+               'AMXL': 4.75, 'NJL': 0.32, 'AMPL': 0.40}
 
     # 10. SBU Map
     sbu_map = {19: 'APFIL', 36: 'AEL', 58: 'ACCL', 64: 'ASLL', 69: 'ARMCL', 72: 'BTL_Coal',
@@ -451,7 +453,8 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 </header>
 
 <div class="flag-card">
-<b>Basis:</b> Revenue = net of sales returns (GL 3010001–3010006, credits − debits). Unallocated cement deliveries (intSBUId=0) mapped to ACCL (58). <b>Overrides still needed:</b> ABL (124) and Orca (126) have persistent gaps vs portal. BTL_G2G dormant since Jul 2026.
+<b>Basis:</b> Revenue = net of sales returns (GL 3010001–3010006, credits − debits). Unallocated cement deliveries (intSBUId=0) mapped to ACCL (58). <b>Overrides still needed:</b> ABL (124) and Orca (126) have persistent gaps vs portal. BTL_G2G dormant since Jul 2026.<br>
+<b>Targets (Sep 2026, "Forecasted Revenue Sept. 2026"):</b> AEL = Manufacturing + Export + Trading (129.50 Cr combined). Shipping "ALL" (272.76 Cr) is a combined target for ASLL, AOCN, AMTL, ASeLL, ASLL-1, ASeLLC — no per-SBU split, so those rows show no individual Monthly Tgt.
 </div>
 
 <div class="kpi-row" id="kpi-row"></div>
@@ -516,7 +519,7 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 <table class="scorecard-table">
 <thead>
 <tr>
-<th>SBU</th><th class="num">Daily Rev</th><th class="num">DoD%</th><th class="num">MTD Rev</th><th class="num">MTD Tgt</th><th class="num">Ach%</th>
+<th>SBU</th><th class="num">Daily Rev</th><th class="num">DoD%</th><th class="num">MTD Rev</th><th class="num">Monthly Tgt</th><th class="num">MTD Tgt</th><th class="num">Ach%</th>
 <th class="num">MoM%</th><th class="num">YoY%</th><th class="num">FY YTD</th><th class="num">CY YTD</th><th class="num">Proj M/E</th><th>Signal</th>
 <th class="num">MTD Vol</th><th class="num">Daily Vol</th><th></th></tr>
 </thead>
@@ -698,6 +701,7 @@ function renderScorecard(){{
 <td class="num">${{fmt(r.daily_rev)}}</td>
 <td class="num ${{dodPct!=null&&dodPct>=0?'mom-up':dodPct!=null?'mom-down':''}}">${{dodPct!=null?fmt(dodPct,1)+'%':'—'}}</td>
 <td class="num">${{fmt(r.mtd_rev)}}</td>
+<td class="num" style="color:#38bdf8">${{r.mo_tgt_rev!=null?fmt(r.mo_tgt_rev):'—'}}</td>
 <td class="num">${{r.mtd_tgt_rev!=null?fmt(r.mtd_tgt_rev):'—'}}</td>
 <td class="num ${{r.mtd_ach_pct!=null&&r.mtd_ach_pct>=100?'mom-up':r.mtd_ach_pct!=null&&r.mtd_ach_pct<50?'mom-down':''}}">${{r.mtd_ach_pct!=null?fmt(r.mtd_ach_pct,1)+'%':'—'}}</td>
 <td class="num ${{r.mom_pct!=null&&r.mom_pct>0?'mom-up':r.mom_pct!=null?'mom-down':''}}">${{r.mom_pct!=null?fmt(r.mom_pct,1)+'%':'—'}}</td>
@@ -709,7 +713,7 @@ function renderScorecard(){{
 <td class="num vol-cell">${{r.has_vol&&r.mtd_vol!=null?fmt(r.mtd_vol,1):'—'}}</td>
 <td class="num vol-cell">${{r.has_vol&&r.daily_vol!=null?fmt(r.daily_vol,1):'—'}}</td>
 <td></td></tr>
-<tr class="chart-row" id="cr-${{idx}}"><td colspan="15"><div class="chart-canvas-wrap"><canvas id="c${{idx}}" width="560" height="200"></canvas></div></td></tr>`;
+<tr class="chart-row" id="cr-${{idx}}"><td colspan="16"><div class="chart-canvas-wrap"><canvas id="c${{idx}}" width="560" height="200"></canvas></div></td></tr>`;
   }});
   document.getElementById('scorecard-body').innerHTML=tbodyHTML;
   // Re-bind chart toggle handlers
