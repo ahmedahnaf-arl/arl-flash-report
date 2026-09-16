@@ -278,6 +278,33 @@ def get_report_data(report_date):
         if _t['d'] == rd_str:
             ord_daily[_s] = ord_daily.get(_s, 0) + _t['c']
 
+    # 8d. FY daily revenue history (Cr) per SBU — for date-range filter
+    c.execute(f"""
+        SELECT CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END AS sbu, CAST(j.dteTransactionDate AS DATE) AS dt, SUM(-j.numAmount)/10000000.0 AS daily_rev
+        FROM DWH.fin.tblAccountingJournalArc j
+        WHERE j.strGeneralLedgerCode IN ('3010001','3010002','3010005','3010006') AND j.isActive=1
+          AND j.dteTransactionDate>='{fy_start}' AND j.dteTransactionDate<'{next_str}'
+          AND j.intSBUId NOT IN (103,116,119,122,111)
+        GROUP BY CASE WHEN j.intSBUId=0 THEN 58 ELSE j.intSBUId END, CAST(j.dteTransactionDate AS DATE)
+        ORDER BY sbu, dt
+    """)
+    hist_rev = {}
+    for row in c.fetchall():
+        hist_rev.setdefault(row[0], {})[str(row[1])] = round(float(row[2] or 0), 6)
+
+    # 8e. FY daily sales-order history per SBU — for date-range filter
+    c.execute(f"""
+        SELECT CASE WHEN intSUBID=0 THEN 58 ELSE intSUBID END AS sbu, CAST(dteSalesOrderDate AS DATE) AS d, COUNT(*) AS orders
+        FROM DWH.oms.tblSalesOrderHeaderArc
+        WHERE dteSalesOrderDate >= '{fy_start}' AND dteSalesOrderDate < '{next_str}'
+          AND intSUBID NOT IN (103,116,119,122,111) AND isActive = 1
+        GROUP BY CASE WHEN intSUBID=0 THEN 58 ELSE intSUBID END, CAST(dteSalesOrderDate AS DATE)
+        ORDER BY sbu, d
+    """)
+    hist_ord = {}
+    for row in c.fetchall():
+        hist_ord.setdefault(row[0], {})[str(row[1])] = int(row[2])
+
     # 9. Targets (Sep-26 from Google Sheets forecast, column H "Forecasted Revenue Sept. 2026")
     targets = {'APFIL': 21.09, 'AEL': 129.50, 'ACCL': 182.11, 'ARMCL': 45.02,
                'BTL_Coal': 0.0, 'DTL_Coal': 56.87, 'iBOS': 2.52, 'BPL': 6.50,
@@ -323,6 +350,9 @@ def get_report_data(report_date):
         if _sbu in td_bdt:
             for _d in td_bdt[_sbu]:
                 td_bdt[_sbu][_d] = round(td_bdt[_sbu][_d] * _rate, 2)
+        if _sbu in hist_rev:
+            for _d in hist_rev[_sbu]:
+                hist_rev[_sbu][_d] = round(hist_rev[_sbu][_d] * _rate, 6)
     g5all = round(float(g5all) + fx_extra, 6)
 
     # Compute reconciliation
@@ -344,6 +374,7 @@ def get_report_data(report_date):
         'gl': gl_rows, 'fr_d': fr_d, 'fr_m': fr_m,
         'dv': dv, 'mv': mv, 'mov': mov, 'td': td,
         'td_bdt': td_bdt, 'ord_td': ord_td, 'ord_mtd': ord_mtd, 'ord_daily': ord_daily,
+        'hist_rev': hist_rev, 'hist_ord': hist_ord,
         'g1all': g1all, 'excl': excl, 'g5all': g5all, 'g2all': g2all, 'g6all': g6all, 'g4all': g4all,
         'rpt_gl1': rpt_gl1, 'rpt_frt': rpt_frt, 'rpt_tot': rpt_tot,
         'full_tot': full_tot, 'gap': gap,
@@ -366,6 +397,8 @@ def build_html(data):
     ord_td_js = js(data['ord_td'])
     ord_mtd_js = js(data['ord_mtd'])
     ord_daily_js = js(data['ord_daily'])
+    hist_rev_js = js(data['hist_rev'])
+    hist_ord_js = js(data['hist_ord'])
 
     # Compute KPI totals
     total_daily = 0; total_mtd = 0; total_fy = 0; total_cy = 0; ach_list = []
@@ -443,6 +476,14 @@ header .meta{{color:#94a3b8;font-size:1rem;margin-top:0.25rem}}
 .scorecard-controls select:focus,.scorecard-controls input:focus{{outline:none;border-color:#38bdf8}}
 .scorecard-controls input{{min-width:220px}}
 .scorecard-controls label{{color:#94a3b8;font-size:0.9rem;margin-right:0.25rem}}
+.date-filter{{display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;padding:0.75rem;background:#1e293b;border:1px solid #334155;border-radius:0.6rem}}
+.date-filter label{{color:#94a3b8;font-size:0.85rem}}
+.date-filter input[type=date]{{background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:0.45rem;padding:0.4rem 0.6rem;font-size:0.9rem}}
+.date-filter input[type=date]:focus{{outline:none;border-color:#38bdf8}}
+.date-filter button{{background:#38bdf8;color:#0f172a;border:none;border-radius:0.45rem;padding:0.4rem 0.9rem;font-weight:700;font-size:0.85rem;cursor:pointer}}
+.date-filter button.reset{{background:#334155;color:#e2e8f0}}
+.date-filter button:hover{{filter:brightness(1.1)}}
+.date-filter .df-status{{color:#38bdf8;font-size:0.85rem}}
 .chart-stats{{display:flex;gap:1rem;margin-bottom:0.75rem;font-size:0.9rem;color:#94a3b8;flex-wrap:wrap}}
 .chart-stats span{{background:#0f172a;padding:0.25rem 0.6rem;border-radius:0.35rem;border:1px solid #334155}}
 .chart-stats b{{color:#38bdf8}}
@@ -555,6 +596,15 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 <div class="recon-note" id="recon-note"></div>
 </div>
 
+<div class="date-filter" id="date-filter">
+<label>Date range:</label>
+<input type="date" id="df-start">
+<label>to</label>
+<input type="date" id="df-end">
+<button onclick="applyDateFilter()">Apply</button>
+<button class="reset" onclick="resetDateFilter()">Reset to MTD</button>
+<span class="df-status" id="df-status"></span>
+</div>
 <div class="scorecard-controls">
 <label>Sort by:</label>
 <select id="scorecard-sort" onchange="sortScorecard()">
@@ -570,7 +620,7 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 </div>
 <div class="scorecard-wrap">
 <table class="scorecard-table">
-<thead>
+<thead id="scorecard-head">
 <tr>
 <th>SBU</th><th class="num">Daily Rev</th><th class="num">DoD%</th><th class="num">MTD Rev</th><th class="num">Monthly Tgt</th><th class="num">MTD Tgt</th><th class="num">Ach%</th>
 <th class="num">MoM%</th><th class="num">YoY%</th><th class="num">FY YTD</th><th class="num">CY YTD</th><th class="num">Proj M/E</th><th>Signal</th>
@@ -600,6 +650,8 @@ const TD_BDT={td_bdt_js};
 const ORD_TD={ord_td_js};
 const ORD_MTD={ord_mtd_js};
 const ORD_DAILY={ord_daily_js};
+const HIST_REV={hist_rev_js};
+const HIST_ORD={hist_ord_js};
 const FR_D={js(data['fr_d'])};
 const FR_M={js(data['fr_m'])};
 const DV={js(data['dv'])};
@@ -742,7 +794,47 @@ document.getElementById('recon-note').textContent='Gap: '+fmt(RECON.gap)+' Cr. R
 let top3IDs=new Set([...ALL].filter(r=>r.mtd_rev>0).sort((a,b)=>b.mtd_rev-a.mtd_rev).slice(0,3).map(r=>r.id));
 let SCORECARD_SORT='mtd_rev';
 let SCORECARD_FILTER='';
+let RANGE_START=null, RANGE_END=null;
+const MTD_HEAD=document.getElementById('scorecard-head').innerHTML;
+function countDays(s,e){{ let a=new Date(s+'T00:00:00'), b=new Date(e+'T00:00:00'); return Math.round((b-a)/86400000)+1; }}
+function applyDateFilter(){{
+  let s=document.getElementById('df-start').value, e=document.getElementById('df-end').value;
+  if(!s||!e){{ alert('Select both From and To dates'); return; }}
+  if(s>e){{ let t=s; s=e; e=t; document.getElementById('df-start').value=s; document.getElementById('df-end').value=e; }}
+  RANGE_START=s; RANGE_END=e;
+  renderScorecard();
+}}
+function resetDateFilter(){{
+  RANGE_START=null; RANGE_END=null;
+  document.getElementById('df-start').value=''; document.getElementById('df-end').value='';
+  document.getElementById('df-status').textContent='';
+  renderScorecard();
+}}
+function renderRangeScorecard(){{
+  let s=RANGE_START, e=RANGE_END, days=countDays(s,e);
+  let q=(SCORECARD_FILTER||'').toLowerCase();
+  let rows=ALL.map(r=>{{
+    let revMap=HIST_REV[r.id]||{{}}, ordMap=HIST_ORD[r.id]||{{}};
+    let rev=0, ord=0;
+    for(let d in revMap){{ if(d>=s&&d<=e) rev+=revMap[d]; }}
+    for(let d in ordMap){{ if(d>=s&&d<=e) ord+=ordMap[d]; }}
+    return {{ code:r.code, id:r.id, rev:rev, ord:ord }};
+  }}).filter(x=>x.rev>0||x.ord>0).filter(x=>!q||x.code.toLowerCase().includes(q));
+  rows.sort((a,b)=>b.rev-a.rev);
+  document.getElementById('scorecard-head').innerHTML='<tr><th>SBU</th><th class="num">Revenue (Cr)</th><th class="num">Orders</th><th class="num">Avg Daily Rev (Cr)</th><th class="num">Avg Daily Orders</th><th class="num">Days</th></tr>';
+  let tbodyHTML='', totRev=0, totOrd=0;
+  rows.forEach((x,i)=>{{
+    totRev+=x.rev; totOrd+=x.ord;
+    let topCls=i<3?' top-performer':'';
+    tbodyHTML+=`<tr class="${{topCls}}"><td>${{x.code}}</td><td class="num rev">${{fmt(x.rev)}}</td><td class="num">${{x.ord.toLocaleString('en-US')}}</td><td class="num">${{fmt(x.rev/days)}}</td><td class="num">${{(x.ord/days).toFixed(1)}}</td><td class="num">${{days}}</td></tr>`;
+  }});
+  tbodyHTML+=`<tr style="background:#0f172a;font-weight:700"><td>Total (${{rows.length}} SBUs)</td><td class="num rev">${{fmt(totRev)}}</td><td class="num">${{totOrd.toLocaleString('en-US')}}</td><td class="num">${{fmt(totRev/days)}}</td><td class="num">${{(totOrd/days).toFixed(1)}}</td><td class="num">${{days}}</td></tr>`;
+  document.getElementById('scorecard-body').innerHTML=tbodyHTML;
+  document.getElementById('df-status').textContent='Range: '+s+' → '+e+' ('+days+' days) · '+rows.length+' SBUs';
+}}
 function renderScorecard(){{
+  if(RANGE_START&&RANGE_END){{ renderRangeScorecard(); return; }}
+  document.getElementById('scorecard-head').innerHTML=MTD_HEAD;
   let sorted=[...ALL];
   let sortBy=SCORECARD_SORT;
   if(sortBy==='mtd_rev'||sortBy==='daily_rev'||sortBy==='proj_rev') sorted.sort((a,b)=>b[sortBy]-a[sortBy]);
@@ -941,6 +1033,13 @@ function drawSBUDetail(idx){{
 }}
 
 window.addEventListener('load',function(){{ drawPortfolioDaily(); drawTop5Stacked(); document.getElementById('loading-overlay').classList.add('hidden'); }});
+// Set date filter bounds from available FY history
+(function(){{
+  let mn=null,mx=null;
+  Object.values(HIST_REV).forEach(m=>Object.keys(m).forEach(d=>{{ if(!mn||d<mn)mn=d; if(!mx||d>mx)mx=d; }}));
+  let ds=document.getElementById('df-start'), de=document.getElementById('df-end');
+  if(mn){{ ds.min=mn; de.min=mn; }} if(mx){{ ds.max=mx; de.max=mx; }}
+}})();
 </script>
 </body>
 </html>'''
