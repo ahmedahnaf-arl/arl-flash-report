@@ -727,6 +727,7 @@ kpiHTML+=`<div class="kpi-card"><div class="label">Avg MTD Achievement</div><div
 kpiHTML+=`<div class="kpi-card"><div class="label">Yearly Revenue (CY YTD)</div><div class="val">${{fmt(totalCY)}} Cr</div><div class="sub">Jan 1 – {date_str}</div></div>`;
 kpiHTML+=`<div class="kpi-card"><div class="label">YTD Revenue FY26-27</div><div class="val">${{fmt(totalFY)}} Cr</div><div class="sub">Jul 1 – {date_str}</div></div>`;
 document.getElementById('kpi-row').innerHTML=kpiHTML;
+const MTD_KPI_HTML=kpiHTML;
 
 // MTD bar chart
 let byMTD=[...ALL].filter(r=>r.mtd_rev>0).sort((a,b)=>b.mtd_rev-a.mtd_rev).slice(0,15);
@@ -810,7 +811,27 @@ function resetDateFilter(){{
   document.getElementById('df-status').textContent='';
   renderScorecard();
 }}
+function renderRangeKPIs(){{
+  let s=RANGE_START, e=RANGE_END, days=countDays(s,e);
+  let totRev=0, totOrd=0, active=0;
+  ALL.forEach(r=>{{
+    let revMap=HIST_REV[r.id]||{{}}, ordMap=HIST_ORD[r.id]||{{}};
+    let rev=0, ord=0;
+    for(let d in revMap){{ if(d>=s&&d<=e) rev+=revMap[d]; }}
+    for(let d in ordMap){{ if(d>=s&&d<=e) ord+=ordMap[d]; }}
+    totRev+=rev; totOrd+=ord; if(rev>0||ord>0) active++;
+  }});
+  let html='';
+  html+=`<div class="kpi-card"><div class="label">Range Revenue</div><div class="val">${{fmt(totRev)}} Cr</div><div class="sub">${{s}} → ${{e}}</div></div>`;
+  html+=`<div class="kpi-card"><div class="label">Range Orders</div><div class="val">${{totOrd.toLocaleString('en-US')}}</div><div class="sub">Sales orders</div></div>`;
+  html+=`<div class="kpi-card"><div class="label">Avg Daily Revenue</div><div class="val">${{fmt(totRev/days)}} Cr</div><div class="sub">${{days}} days</div></div>`;
+  html+=`<div class="kpi-card"><div class="label">Avg Daily Orders</div><div class="val">${{(totOrd/days).toFixed(1)}}</div><div class="sub">${{days}} days</div></div>`;
+  html+=`<div class="kpi-card"><div class="label">Days in Range</div><div class="val">${{days}}</div><div class="sub">${{s}} → ${{e}}</div></div>`;
+  html+=`<div class="kpi-card"><div class="label">Active SBUs</div><div class="val">${{active}}</div><div class="sub">with revenue or orders</div></div>`;
+  document.getElementById('kpi-row').innerHTML=html;
+}}
 function renderRangeScorecard(){{
+  renderRangeKPIs();
   let s=RANGE_START, e=RANGE_END, days=countDays(s,e);
   let q=(SCORECARD_FILTER||'').toLowerCase();
   let rows=ALL.map(r=>{{
@@ -835,6 +856,7 @@ function renderRangeScorecard(){{
 function renderScorecard(){{
   if(RANGE_START&&RANGE_END){{ renderRangeScorecard(); return; }}
   document.getElementById('scorecard-head').innerHTML=MTD_HEAD;
+  document.getElementById('kpi-row').innerHTML=MTD_KPI_HTML;
   let sorted=[...ALL];
   let sortBy=SCORECARD_SORT;
   if(sortBy==='mtd_rev'||sortBy==='daily_rev'||sortBy==='proj_rev') sorted.sort((a,b)=>b[sortBy]-a[sortBy]);
