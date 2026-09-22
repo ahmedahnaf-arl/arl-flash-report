@@ -333,7 +333,7 @@ def get_report_data(report_date):
     # FX conversion for foreign-currency shipping SBUs (book in USD/AED, must be BDT in report):
     #   ASLL-1 (80)  = AKIJ SHIPPING LINES PTE LTD, SINGAPORE  -> USD -> BDT x 122.50
     #   ASeLLC (110) = AKIJ SEA LINE SHIP MANAGEMENT L.L.C    -> AED -> BDT x 34.00
-    FX_RATES = {80: 122.50, 110: 34.00}
+    FX_RATES = {80: 123.00, 110: 33.49}
     fx_extra = 0.0  # extra BDT to add to full-GL freight total so reconciliation stays consistent
     for _sbu, _rate in FX_RATES.items():
         _g = gl_rows.get(_sbu)
@@ -359,7 +359,7 @@ def get_report_data(report_date):
     rpt_gl1 = round(float(g1all) - float(excl), 6)
     rpt_frt = round(sum(float(v) for v in fr_m.values()), 6)
     rpt_tot = round(rpt_gl1 + rpt_frt, 6)
-    full_tot = round(float(g1all) + float(g5all) + float(g2all) + float(g6all) + float(g4all), 6)
+    full_tot = round(float(g1all) + float(g5all), 6)
     gap = round(full_tot - rpt_tot, 6)
 
     month_pct = round(mf * 100, 1)
@@ -582,14 +582,11 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 </table>
 </div>
 <div class="recon-col">
-<h4>Full GL Revenue (sub-schedule)</h4>
+<h4>Reconciled Revenue</h4>
 <table>
 <tr><td>GL 3010001 Sales (Local)</td><td class="val" id="full-3010001">—</td></tr>
-<tr><td>GL 3010002 Sales (Foreign)</td><td class="val" id="full-3010002">—</td></tr>
 <tr><td>GL 3010005 Freight Income</td><td class="val" id="full-3010005">—</td></tr>
-<tr><td>GL 3010006 Agency Income</td><td class="val" id="full-3010006">—</td></tr>
-<tr><td>GL 3010004 Other Income</td><td class="val" id="full-3010004">—</td></tr>
-<tr class="total"><td>Full GL Total</td><td class="val" id="full-total">—</td></tr>
+<tr class="total"><td>Reconciled Total</td><td class="val" id="full-total">—</td></tr>
 </table>
 </div>
 </div>
@@ -784,12 +781,9 @@ document.getElementById('rpt-gross').textContent=fmt(RECON.rpt_gl1)+' Cr';
 document.getElementById('rpt-freight').textContent=fmt(RECON.rpt_frt)+' Cr';
 document.getElementById('rpt-total').textContent=fmt(RECON.rpt_tot)+' Cr';
 document.getElementById('full-3010001').textContent=fmt(RECON.g1all)+' Cr';
-document.getElementById('full-3010002').textContent=fmt(RECON.g2all)+' Cr';
 document.getElementById('full-3010005').textContent=fmt(RECON.g5all)+' Cr';
-document.getElementById('full-3010006').textContent=fmt(RECON.g6all)+' Cr';
-document.getElementById('full-3010004').textContent=fmt(RECON.g4all)+' Cr';
 document.getElementById('full-total').textContent=fmt(RECON.full_tot)+' Cr';
-document.getElementById('recon-note').textContent='Gap: '+fmt(RECON.gap)+' Cr. Report revenue = GL 3010001–3010006 (Sales Local/Foreign, Freight, Agency). Right column includes recon-only entities (103,116,119,122,111: '+fmt(RECON.excl)+' Cr), non-report SBU entries, full-scope 3010005, and 3010004 export/other. ABL (124), Orca (126), and ALEL (114) still need portal verification.';
+document.getElementById('recon-note').textContent='Gap: '+fmt(RECON.gap)+' Cr. Reconciled revenue = GL 3010001 Sales (Local) + GL 3010005 Freight Income (all entities, freight FX-converted to BDT). Right column includes recon-only entities (103,116,119,122,111: '+fmt(RECON.excl)+' Cr) and non-report SBU entries. ABL (124) and Orca (126) still need portal verification.';
 
 // Scorecard
 let top3IDs=new Set([...ALL].filter(r=>r.mtd_rev>0).sort((a,b)=>b.mtd_rev-a.mtd_rev).slice(0,3).map(r=>r.id));
