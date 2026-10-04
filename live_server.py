@@ -907,6 +907,12 @@ function drawPortfolioDaily(){{
   let ctx=c.getContext('2d'),w=c.width,h=c.height,pad={{top:25,right:30,bottom:25,left:50}};
   let dtMap={{}};TD.forEach(t=>{{dtMap[t.d]=(dtMap[t.d]||0)+t.v;}});
   let dates=Object.keys(dtMap).sort(),vals=dates.map(d=>dtMap[d]);
+  if(!dates.length){{
+    ctx.fillStyle='#94a3b8';ctx.font='13px sans-serif';
+    ctx.fillText('No daily revenue data yet for this period',20,40);
+    let st=document.getElementById('portfolio-stats'); if(st) st.innerHTML='<span>No data available</span>';
+    return;
+  }}
   let ymax=Math.max(...vals)*1.2;
   let cW=w-pad.left-pad.right,cH=h-pad.top-pad.bottom;
   drawAxes(ctx,w,h,pad,ymax,dates.map(d=>d.slice(8)),'Cr');
@@ -955,6 +961,11 @@ function drawTop5Stacked(){{
   let byMTD=[...ALL].filter(r=>r.mtd_rev>0).sort((a,b)=>b.mtd_rev-a.mtd_rev).slice(0,5);
   let colors=['#38bdf8','#818cf8','#c084fc','#f472b6','#fbbf24'];
   let dates=[...new Set(TD.map(t=>t.d))].sort();
+  if(!dates.length){{
+    ctx.fillStyle='#94a3b8';ctx.font='13px sans-serif';
+    ctx.fillText('No daily data yet',20,40);
+    return;
+  }}
   let cW=w-pad.left-pad.right,cH=h-pad.top-pad.bottom;
   let maxStack=0;
   dates.forEach(d=>{{ let stack=byMTD.reduce((s,r)=>s+(TD.filter(t=>t.d===d&&t.s===r.id).reduce((a,b)=>a+b.v,0)),0);maxStack=Math.max(maxStack,stack); }});
@@ -1048,7 +1059,7 @@ function drawSBUDetail(idx){{
     </table></div>`;
 }}
 
-window.addEventListener('load',function(){{ drawPortfolioDaily(); drawTop5Stacked(); document.getElementById('loading-overlay').classList.add('hidden'); }});
+window.addEventListener('load',function(){{ document.getElementById('loading-overlay').classList.add('hidden'); try{{ drawPortfolioDaily(); drawTop5Stacked(); }}catch(e){{ }} }});
 // Set date filter bounds from available FY history
 (function(){{
   let mn=null,mx=null;
