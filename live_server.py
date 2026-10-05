@@ -543,7 +543,7 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 <div id="app">
 <header>
 <h1>AKIJ RESOURCE — Daily SBU Sales Flash Report</h1>
-<div class="meta">Report Date: {date_str} | Period: {data['period']} (Day {data['day_label']}, {month_pct}%) | Source: DWH GL 3010001–3010006 (Revenue sub-schedule) | FY 2026-27 | Live</div>
+<div class="meta">Report Date: {date_str} | Period: {data['period']} (Day {data['day_label']}, {month_pct}%) | Source: ERP GL 3010001–3010006 (Revenue sub-schedule) | FY 2026-27 | Live</div>
 </header>
 
 <div class="flag-card">
@@ -626,7 +626,7 @@ footer{{text-align:center;color:#64748b;font-size:0.85rem;padding:1.5rem 0;borde
 <tbody id="scorecard-body"></tbody>
 </table>
 </div>
-<footer>Powered by ARL Live Flash Report Engine · DWH GL 3010001–3010006 (Revenue sub-schedule) · sms.tblDeliveryHeaderArc · Generated live on {date_str} · Next refresh: reload page</footer>
+<footer>Powered by ARL Live Flash Report Engine · ERP GL 3010001–3010006 (Revenue sub-schedule) · sms.tblDeliveryHeader · Generated live on {date_str} · Next refresh: reload page</footer>
 </div>
 
 <script>
@@ -758,7 +758,7 @@ snapHTML+=`<li>Daily Revenue ({rd.strftime('%b')} {de}): <b>${{fmt(totalDaily)}}
 snapHTML+=`<li>Month Progress: <b>${{DE}}/${{DM}} (${{fmt(M_FACTOR*100,1)}}%)</b></li>`;
 snapHTML+=`<li>Projected Month-End: <b>${{fmt(projME)}} Cr</b></li>`;
 snapHTML+=`<li>Avg Daily Run Rate: <b>${{fmt(totalMTD/DE)}} Cr/day</b></li>`;
-snapHTML+=`<li>DWH Sync: Live query at load time</li>`;
+snapHTML+=`<li>ERP Sync: Live query at load time</li>`;
 snapHTML+='</ul></div>';
 let hiHTML='<div class="insight-box"><h3>SBU Highlights</h3><ul>';
 top3.forEach(r=>hiHTML+=`<li class="pos">${{r.code}}: MTD ${{fmt(r.mtd_rev)}} Cr — leader (#${{top3.indexOf(r)+1}})</li>`);
