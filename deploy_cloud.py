@@ -1,7 +1,7 @@
 """
 Cloud deploy for ARL Flash Report (GitHub Actions).
-Builds the T-1 report from DWH and writes to a target index.html path.
-DWH creds come from env: DWH_SERVER, DWH_USER, DWH_PASSWORD (DWH_PORT optional).
+Builds the T-1 report from the live ERP (via enterprise-api-gateway) and writes
+to a target index.html path.
 Usage: python deploy_cloud.py <output_path>
 """
 import os

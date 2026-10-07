@@ -55,7 +55,42 @@ def js(obj):
         return "null"
     return str(obj)
 
+class _ERPCursor:
+    """Cursor backed by the live ERP (enterprise-api-gateway), not the DWH."""
+    def __init__(self, erp_query):
+        self._erp_query = erp_query
+        self._rows = []
+
+    def execute(self, sql):
+        # DWH table names (schema 'DWH.' + 'Arc' suffix) -> ERP table names
+        self._rows = self._erp_query(sql.replace("DWH.", "").replace("Arc", ""))
+
+    def fetchall(self):
+        return [tuple(r) for r in self._rows]
+
+    def fetchone(self):
+        return tuple(self._rows[0]) if self._rows else None
+
+
+class _ERPConn:
+    def __init__(self, erp_query):
+        self._erp_query = erp_query
+
+    def cursor(self):
+        return _ERPCursor(self._erp_query)
+
+    def close(self):
+        pass
+
+
 def get_conn():
+    # Primary: live ERP via enterprise-api-gateway (the DWH copy is unreliable).
+    # Fall back to the DWH only if the ERP client cannot be imported.
+    try:
+        from erp_client import erp_query
+        return _ERPConn(erp_query)
+    except Exception:
+        pass
     # Cloud mode: DWH creds from environment (self-hosted runner uses pymssql)
     if os.environ.get("DWH_SERVER"):
         import pymssql
