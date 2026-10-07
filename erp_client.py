@@ -7,9 +7,15 @@ import os
 
 import requests
 
-GATEWAY_URL = "https://enterprise-api-gateway.ibos.agency/mcp"
-_ERP_API_KEY = os.environ.get("ERP_API_KEY", "ak_live_x-rKU46rK3LHPOF1-dKfn5CKB30GkJou949TxsCciSg")
-_DEVICE_ID = os.environ.get("ERP_DEVICE_ID", "6d690888b4754676a6a1d31004e70d25")
+GATEWAY_URL = os.environ.get("ERP_GATEWAY_URL", "https://enterprise-api-gateway.ibos.agency/mcp")
+# Credentials MUST come from the environment (server-side secret store). No hardcoded defaults.
+_ERP_API_KEY = os.environ.get("ERP_API_KEY", "")
+_DEVICE_ID = os.environ.get("ERP_DEVICE_ID", "")
+if not _ERP_API_KEY or not _DEVICE_ID:
+    raise RuntimeError(
+        "ERP_API_KEY and ERP_DEVICE_ID must be set in the environment (server-side). "
+        "Do not hardcode credentials in source."
+    )
 HEADERS = {
     "Authorization": f"Bearer {_ERP_API_KEY}",
     "X-Device-Id": _DEVICE_ID,
