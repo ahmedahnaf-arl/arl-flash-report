@@ -4,6 +4,8 @@ Used as a drop-in replacement for the stalled DWH in the flash report build.
 """
 import json
 import os
+import socket
+from urllib.parse import urlparse
 
 import requests
 
@@ -22,6 +24,21 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Request timeout for a single query (seconds).
+QUERY_TIMEOUT = int(os.environ.get("ERP_QUERY_TIMEOUT", "90"))
+
+
+def erp_available(timeout=6):
+    """Fast TCP preflight so an unreachable gateway fails in seconds, not minutes."""
+    try:
+        u = urlparse(GATEWAY_URL)
+        host = u.hostname
+        port = u.port or (443 if u.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
 
 def erp_query(sql, limit=500):
     """Run a read-only SQL query against the ERP and return rows as list-of-lists."""
@@ -34,7 +51,7 @@ def erp_query(sql, limit=500):
             "arguments": {"sql": sql, "limit": limit},
         },
     }
-    r = requests.post(GATEWAY_URL, headers=HEADERS, json=payload, timeout=180)
+    r = requests.post(GATEWAY_URL, headers=HEADERS, json=payload, timeout=QUERY_TIMEOUT)
     r.raise_for_status()
     outer = r.json()
     if "result" not in outer:
