@@ -551,9 +551,75 @@ document.getElementById('signin').addEventListener('click',signIn);document.getE
         .replace('__ROWS__', rows_html)
 
 
+def build_november_html(data):
+    """November 2026 ? official sub-schedule actuals with Budget & Forecast targets."""
+    import nov2026_data as N
+    from html import escape as esc
+
+    def cr(v):
+        return f"{v/1e7:,.4f}"
+
+    def pct(a, b):
+        return None if not b else a / b * 100
+
+    rows_html = []
+    for i, r in enumerate(N.ROWS, 1):
+        ab, af = pct(r["actual"], r["budget"]), pct(r["actual"], r["forecast"])
+        var = None if r["erp"] is None else (r["erp"] - r["actual"]) / 1e7
+        vcls = "" if var is None else ("pos" if var > 0.005 else ("neg" if var < -0.005 else "ok"))
+        abcls = "" if ab is None else ("good" if ab >= 100 else ("mid" if ab >= 60 else "bad"))
+        rows_html.append(
+            "<tr>"
+            f"<td class='n'>{i}</td><td>{esc(r['code']) or '&mdash;'}</td>"
+            f"<td>{esc(r['name'])}</td><td class='c'>{esc(r['uom'])}</td>"
+            f"<td class='num'>{cr(r['actual'])}</td><td class='num'>{cr(r['budget'])}</td>"
+            f"<td class='num'>{cr(r['forecast'])}</td>"
+            f"<td class='num {abcls}'>{'?' if ab is None else f'{ab:,.1f}%'}</td>"
+            f"<td class='num'>{'?' if af is None else f'{af:,.1f}%'}</td>"
+            f"<td class='num'>{'?' if r['erp'] is None else cr(r['erp'])}</td>"
+            f"<td class='num {vcls}'>{'?' if var is None else f'{var:+,.4f}'}</td>"
+            f"<td class='note'>{esc(r['note'])}</td></tr>"
+        )
+
+    actual, budget, forecast = N.ACTUAL_TOTAL, N.BUDGET_TOTAL, N.FORECAST_TOTAL
+    ach_b = actual / budget * 100 if budget else 0
+    ach_f = actual / forecast * 100 if forecast else 0
+    gap_b = (actual - budget) / 1e7
+
+    top = sorted([r for r in N.ROWS if r["actual"] > 0], key=lambda r: -r["actual"])[:8]
+    worst = sorted([r for r in N.ROWS if r["forecast"] > 0], key=lambda r: r["actual"] / r["forecast"])[:8]
+    maxv = top[0]["actual"] if top else 1
+
+    top_html = "".join(
+        f"<div class='bar'><span class='lbl'>{esc(r['code'] or 'G2G')}</span>"
+        f"<span class='track'><i style='width:{r['actual']/maxv*100:.1f}%'></i></span>"
+        f"<span class='val'>{r['actual']/1e7:,.2f}</span></div>" for r in top)
+    worst_html = "".join(
+        f"<li><b>{esc(r['code'] or 'G2G')}</b> {r['actual']/r['forecast']*100:,.1f}% of forecast"
+        f" <span class='mu'>({r['actual']/1e7:,.2f} / {r['forecast']/1e7:,.2f} Cr)</span></li>" for r in worst)
+
+    html = open(__file__.replace("live_server.py", "november_template.html"), encoding="utf-8").read()
+    return (html
+            .replace("__PERIOD__", N.PERIOD)
+            .replace("__ASOF__", N.AS_OF)
+            .replace("__DAY__", str(N.DAYS_ELAPSED))
+            .replace("__DIM__", str(N.DAYS_IN_MONTH))
+            .replace("__ACTUAL__", f"{actual/1e7:,.2f}")
+            .replace("__BUDGET__", f"{budget/1e7:,.2f}")
+            .replace("__FORECAST__", f"{forecast/1e7:,.2f}")
+            .replace("__ACHB__", f"{ach_b:,.1f}")
+            .replace("__ACHF__", f"{ach_f:,.1f}")
+            .replace("__GAPB__", f"{gap_b:+,.2f}")
+            .replace("__ROWS__", "\n".join(rows_html))
+            .replace("__TOP__", top_html)
+            .replace("__WORST__", worst_html))
+
+
 def build_html(data):
     """Page 1 — the ERP flash dashboard (unchanged layout)."""
     rd = data['report_date']
+    if rd.year == 2026 and rd.month == 11:
+        return build_november_html(data)
     date_str = rd.strftime("%B %d, %Y")
     title_date = rd.strftime("%b %d, %Y")
 

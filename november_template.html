@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>ARL SBU Revenue Performance — November 2026</title>
+<style>
+:root{--bg:#0f172a;--panel:#1e293b;--line:#334155;--text:#e2e8f0;--mu:#94a3b8;--cyan:#38bdf8;--green:#86efac;--amber:#fbbf24;--red:#fca5a5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,"Segoe UI",sans-serif}
+main{max-width:1620px;margin:0 auto;padding:22px}
+h1{margin:0;font-size:1.7rem;color:#f8fafc}
+h2{color:var(--cyan);font-size:1.05rem;margin:0 0 12px}
+.meta{color:var(--mu);margin-top:5px;font-size:.95rem}
+.portal-nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.portal-nav a{padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:#cbd5e1;text-decoration:none;font-weight:600;font-size:.92rem}
+.portal-nav a.active{background:var(--cyan);border-color:var(--cyan);color:#082f49}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:18px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px;text-align:center}
+.card .l{color:var(--mu);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
+.card .v{font-size:1.55rem;font-weight:750;margin:6px 0;color:#f8fafc}
+.card .s{color:var(--mu);font-size:.82rem}
+.v.green{color:var(--green)}.v.amber{color:var(--amber)}.v.red{color:var(--red)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+.panel.warn{border-left:4px solid var(--amber)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.bar{display:flex;align-items:center;gap:9px;margin:5px 0;font-size:.88rem}
+.bar .lbl{width:78px;text-align:right;color:var(--mu);flex:none}
+.bar .track{flex:1;height:16px;background:#0f172a;border-radius:3px;overflow:hidden}
+.bar .track i{display:block;height:100%;background:linear-gradient(90deg,#38bdf8,#818cf8)}
+.bar .val{width:62px;text-align:right;font-variant-numeric:tabular-nums;color:#cbd5e1;flex:none}
+ul.clean{list-style:none;margin:0;padding:0;font-size:.9rem}
+ul.clean li{padding:4px 0;border-bottom:1px solid #263449}
+.mu{color:var(--mu)}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th,td{padding:8px 9px;border-bottom:1px solid #263449;vertical-align:top}
+th{background:#111d32;color:#cbd5e1;text-align:left;position:sticky;top:0;z-index:1;font-size:.8rem;text-transform:uppercase}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.c{text-align:center}td.n{width:34px;color:var(--mu)}
+td.note{color:#8fa3bd;font-size:.8rem;min-width:210px}
+tr.tot td{font-weight:750;background:#14253b;border-top:2px solid #475569}
+.good{color:var(--green)}.mid{color:var(--amber)}.bad{color:var(--red)}
+.pos{color:var(--amber)}.neg{color:var(--red)}.ok{color:var(--mu)}
+.wrap{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:10px}
+footer{color:#64748b;font-size:.82rem;text-align:center;padding:18px 0}
+#gate{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:#050b16ee;padding:16px}
+#gate[hidden]{display:none}
+.gate-card{width:min(380px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px}
+.gate-card h3{margin:0 0 4px;color:#f8fafc}
+.gate-card input,.gate-card button{width:100%;padding:11px;margin-top:10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--text)}
+.gate-card button{background:var(--cyan);color:#082f49;font-weight:700;cursor:pointer;border:none}
+#err{color:var(--red);margin-top:8px;font-size:.9rem}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div id="gate"><div class="gate-card">
+<h3>ARL Flash Report</h3>
+<div class="mu" style="font-size:.85rem">Sign in to continue</div>
+<input id="u" placeholder="Username" autocomplete="username">
+<input id="p" type="password" placeholder="Password" autocomplete="current-password">
+<button id="go">Sign In</button>
+<div id="err"></div>
+</div></div>
+
+<main>
+<nav class="portal-nav">
+<a class="active" href="index.html">1 &middot; Revenue Performance</a>
+<a href="october-tracker.html">2 &middot; October Revenue Tracker</a>
+</nav>
+
+<header>
+<h1>AKIJ RESOURCE &mdash; SBU Revenue Performance</h1>
+<div class="meta">Period: __PERIOD__ &nbsp;|&nbsp; As of __ASOF__ (Day __DAY__/__DIM__) &nbsp;|&nbsp; Actuals: official sub-schedule &nbsp;|&nbsp; Targets: Budget &amp; Forecast, November 2026</div>
+</header>
+
+<section class="cards">
+<div class="card"><div class="l">Actual Revenue</div><div class="v">__ACTUAL__ Cr</div><div class="s">__PERIOD__</div></div>
+<div class="card"><div class="l">Monthly Budget</div><div class="v">__BUDGET__ Cr</div><div class="s">Full month</div></div>
+<div class="card"><div class="l">Monthly Forecast</div><div class="v">__FORECAST__ Cr</div><div class="s">Full month</div></div>
+<div class="card"><div class="l">Achievement vs Budget</div><div class="v amber">__ACHB__%</div><div class="s">Month-to-date</div></div>
+<div class="card"><div class="l">Achievement vs Forecast</div><div class="v amber">__ACHF__%</div><div class="s">Month-to-date</div></div>
+<div class="card"><div class="l">Gap to Budget</div><div class="v red">__GAPB__ Cr</div><div class="s">MTD actual less budget</div></div>
+</section>
+
+<div class="panel warn">
+<h2>Data basis and ERP cross-check</h2>
+<p>Revenue figures are taken from the official SBU sub-schedule (actuals to 18 November 2026) and are the authoritative numbers, matching the submitted revenue performance summary. Budget and Forecast are the full-month November targets from the same workbook, so achievement is measured month-to-date against a full-month plan.</p>
+<p><b>Where our previous report differed:</b> the ERP feed carries two foreign-currency shipping entities that post in USD and AED &mdash; ASLL-1 (PTE, &times;116.127) and ASeLLC Ship Management (&times;32.798). Those were not converted, which understated shipping. The ERP feed also has no SBU for the <b>G2G</b> line (Bongo &amp; MTS &amp; Shipping BADC/BCIC), and it books DyTCL, HRML and FAL as separate entities that this schedule does not list.</p>
+<p class="mu">ERP comparison column shows the ERP sub-schedule roll-up for the same period, converted to BDT. Variance = ERP minus official actual; positive means ERP is higher.</p>
+</div>
+
+<div class="grid2">
+<div class="panel"><h2>Top 8 by actual revenue (Cr)</h2>__TOP__</div>
+<div class="panel"><h2>Lowest achievement vs forecast</h2><ul class="clean">__WORST__</ul></div>
+</div>
+
+<div class="panel">
+<h2>SBU-wise revenue: actual vs budget vs forecast</h2>
+<div class="wrap">
+<table>
+<thead><tr>
+<th>#</th><th>Code</th><th>SBU</th><th>UOM</th>
+<th class="num">Actual</th><th class="num">Budget</th><th class="num">Forecast</th>
+<th class="num">Ach vs Budget</th><th class="num">Ach vs Forecast</th>
+<th class="num">ERP</th><th class="num">Variance</th><th>ERP mapping</th>
+</tr></thead>
+<tbody>
+__ROWS__
+<tr class="tot"><td></td><td></td><td>Total</td><td></td>
+<td class="num">__ACTUAL__</td><td class="num">__BUDGET__</td><td class="num">__FORECAST__</td>
+<td class="num">__ACHB__%</td><td class="num">__ACHF__%</td><td></td><td></td><td></td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<footer>Generated from the official November 2026 SBU revenue sub-schedule &middot; ERP cross-check via iBOS &middot; All amounts in BDT crore</footer>
+</main>
+
+<script>
+const AUTH={'arl.admin':'Flash@2026','cbdo':'CBDO@ARL26'};
+const gate=document.getElementById('gate');
+function signIn(){
+  const u=document.getElementById('u').value.trim(), p=document.getElementById('p').value;
+  if(AUTH[u]===p){sessionStorage.setItem('arl_flash_auth','1');gate.hidden=true;}
+  else document.getElementById('err').textContent='Invalid credentials';
+}
+document.getElementById('go').addEventListener('click',signIn);
+document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')signIn();});
+if(sessionStorage.getItem('arl_flash_auth'))gate.hidden=true;
+</script>
+</body>
+</html>
