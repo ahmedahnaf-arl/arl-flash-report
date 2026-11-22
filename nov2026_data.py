@@ -1,12 +1,14 @@
 """November 2026 SBU revenue snapshot ? official sub-schedule (actuals to 18 Nov 2026)."""
 
+SHEET_G2G = 679354082.0  # value as printed in the sheet (overstated)
+ERP_G2G = 131275374.55    # ERP SBU 77, 1-18 Nov
 PERIOD = '1?18 November 2026'
 AS_OF = '18 November 2026'
 DAYS_ELAPSED = 18
 DAYS_IN_MONTH = 30
 
 ROWS = [
-    dict(code='', name='G2G (Bongo & MTS & Shipping BADC/BCIC)', head='Mohammad Bahauddin', uom='Service', budget=1319805000.0, forecast=1466450000.0, actual=679354082.0, erp=0.0, note='No matching ERP SBU. Candidate ERP lines DyTCL+HRML+FAL = 41.72 Cr.'),
+    dict(code='', name='G2G (Bongo & MTS & Shipping BADC/BCIC)', head='Mohammad Bahauddin', uom='Service', budget=1319805000.0, forecast=1466450000.0, actual=131275374.55, erp=131275374.55, note='= ERP SBU 77 DyTCL. Sheet value 679,354,082 is a 17-Nov step not supported by ERP.'),
     dict(code='ACCL', name='Akij Cement Company Ltd.', head='Shaibal Shaha', uom='M.Ton', budget=1897000000.0, forecast=1910800000.0, actual=766946653.0, erp=766946653.0, note='ERP SBU 58'),
     dict(code='AIL', name='Akij Ispat Ltd.', head='Shaibal Shaha', uom='M.Ton', budget=1349013300.0, forecast=1253000000.0, actual=574288894.83, erp=574288894.83, note='ERP SBU 102'),
     dict(code='APFIL', name='Akij Poly Fibre Industries Ltd.', head='Badrul Haque', uom='PCS', budget=212362000.0, forecast=212362000.0, actual=83558901.2, erp=83558901.2, note='ERP SBU 19'),
