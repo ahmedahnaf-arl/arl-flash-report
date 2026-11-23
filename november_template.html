@@ -86,7 +86,7 @@ footer{color:#64748b;font-size:.82rem;text-align:center;padding:18px 0}
 
 <div class="panel warn">
 <h2>Data basis</h2>
-<p><b>Actual revenue is pulled live from the ERP ledger</b> (GL 3010001, 3010002, 3010005, 3010006, net of returns) for the period 1&ndash;__ASOF__, at build time. Two shipping entities post in foreign currency and are converted to BDT: ASLL-1 / PTE (USD &times;116.127) and ASeLLC Ship Management (AED &times;32.798).</p>
+<p><b>Actual revenue is taken from the official sub-schedule</b> (sheet &ldquo;Revenue from 01-22 November&rdquo;), which is the authoritative month-to-date figure. <b>Budget and Forecast</b> are the full-month November targets from the same workbook. The <b>ERP</b> column shows the iBOS ledger roll-up for 1&ndash;22 Nov and <b>Variance = ERP minus actual</b>; positive means the ledger is higher.</p>
 <p><b>Budget and Forecast are the full-month November targets</b> from the official sub-schedule workbook, so achievement is month-to-date measured against a full-month plan.</p>
 <p><b>G2G</b> (Bongo &amp; MTS &amp; Shipping BADC/BCIC) maps to <b>ERP SBU 77, Daily Trading Company Ltd</b>. This was verified against the file and the system: the sheet&rsquo;s 15&nbsp;Nov G2G value (10.5804 Cr) sits exactly on ERP SBU 77 for 1&ndash;15 Nov, and the November review deck&rsquo;s to-8-Nov figure (7.04 Cr) matches at 7.0398 Cr. A later sheet revision showed 67.9354 Cr, but ERP SBU 77 is only 11.7453 Cr at 17&nbsp;Nov with zero postings that day, so the report uses the ledger figure.</p>
 </div>
@@ -103,19 +103,25 @@ footer{color:#64748b;font-size:.82rem;text-align:center;padding:18px 0}
 <thead><tr>
 <th>#</th><th>Code</th><th>SBU</th><th>UOM</th>
 <th class="num">Actual</th><th class="num">Budget</th><th class="num">Forecast</th>
-<th class="num">Ach vs Budget</th><th class="num">Ach vs Forecast</th><th>ERP source</th>
+<th class="num">Ach vs Budget</th><th class="num">Ach vs Forecast</th><th class="num">ERP</th><th class="num">Variance</th>
 </tr></thead>
 <tbody>
 __ROWS__
 <tr class="tot"><td></td><td></td><td>Total</td><td></td>
 <td class="num">__ACTUAL__</td><td class="num">__BUDGET__</td><td class="num">__FORECAST__</td>
-<td class="num">__ACHB__%</td><td class="num">__ACHF__%</td><td></td></tr>
+<td class="num">__ACHB__%</td><td class="num">__ACHF__%</td><td></td><td></td></tr>
 </tbody>
 </table>
 </div>
 </div>
 
-<footer>Actuals: live iBOS ERP ledger &middot; Targets: official November 2026 sub-schedule &middot; All amounts in BDT crore</footer>
+<div class="panel">
+<h2>ERP-only entities (not in the schedule)</h2>
+<ul class="clean">__ERPONLY__</ul>
+<p class="mu" style="margin:10px 0 0">These carry revenue in the ERP ledger but have no line or target in the sub-schedule. Subtotal: <b>__ERPONLYTOT__ Cr</b>.</p>
+</div>
+
+<footer>Actuals: official November sub-schedule (to 22 Nov) &middot; ERP cross-check via iBOS &middot; All amounts in BDT crore</footer>
 </main>
 
 <script>

@@ -552,74 +552,60 @@ document.getElementById('signin').addEventListener('click',signIn);document.getE
 
 
 def build_november_html(data):
-    """November 2026 ? live ERP actuals (T-1) against official Budget/Forecast targets."""
+    """November 2026 ? official sub-schedule actuals with ERP cross-check."""
     import nov2026_data as N
     from html import escape as esc
-    import erp_client
 
-    rd = data['report_date']
-    mstart = rd.strftime("%Y-%m-01")
-    nxt = (rd + timedelta(days=1)).strftime("%Y-%m-%d")
+    def cr(v): return f"{v/1e7:,.4f}"
 
-    rows = erp_client.erp_query(f"""
-        SELECT intSBUId, SUM(-numAmount) FROM fin.tblAccountingJournal
-        WHERE isActive=1 AND strGeneralLedgerCode IN ('3010001','3010002','3010005','3010006')
-          AND dteTransactionDate>='{mstart}' AND dteTransactionDate<'{nxt}'
-        GROUP BY intSBUId""")
-    by_sbu = {int(r[0]): float(r[1] or 0) for r in rows}
-    for sbu, rate in N.FX_RATES.items():
-        if sbu in by_sbu:
-            by_sbu[sbu] = by_sbu[sbu] * rate
-
-    def cr(v):
-        return f"{v/1e7:,.4f}"
-
-    actual_total = 0.0
     body = []
-    for i, t in enumerate(N.TARGETS, 1):
-        actual = sum(by_sbu.get(s, 0.0) for s in t['sbus'])
-        actual_total += actual
-        ab = actual / t['budget'] * 100 if t['budget'] else None
-        af = actual / t['forecast'] * 100 if t['forecast'] else None
+    for i, r in enumerate(N.ROWS, 1):
+        ab = r['actual'] / r['budget'] * 100 if r['budget'] else None
+        af = r['actual'] / r['forecast'] * 100 if r['forecast'] else None
+        var = (r['erp'] - r['actual']) / 1e7 if r['erp'] else None
+        vcls = "" if var is None else ("pos" if var > 0.005 else ("neg" if var < -0.005 else "ok"))
         abcls = "" if ab is None else ("good" if ab >= 100 else ("mid" if ab >= 60 else "bad"))
         body.append(
             "<tr>"
-            f"<td class='n'>{i}</td><td>{esc(t['code']) or '&mdash;'}</td>"
-            f"<td>{esc(t['name'])}</td><td class='c'>{esc(t['uom'])}</td>"
-            f"<td class='num'>{cr(actual)}</td><td class='num'>{cr(t['budget'])}</td>"
-            f"<td class='num'>{cr(t['forecast'])}</td>"
+            f"<td class='n'>{i}</td><td>{esc(r['code']) or '&mdash;'}</td>"
+            f"<td>{esc(r['name'])}</td><td class='c'>{esc(r['uom'])}</td>"
+            f"<td class='num'>{cr(r['actual'])}</td><td class='num'>{cr(r['budget'])}</td>"
+            f"<td class='num'>{cr(r['forecast'])}</td>"
             f"<td class='num {abcls}'>{'&mdash;' if ab is None else f'{ab:,.1f}%'}</td>"
             f"<td class='num'>{'&mdash;' if af is None else f'{af:,.1f}%'}</td>"
-            f"<td class='note'>{esc(sorted(set(t['sbus'])) and ', '.join('ERP SBU '+str(x) for x in sorted(set(t['sbus']))))}</td>"
-            "</tr>")
+            f"<td class='num'>{'&mdash;' if not r['erp'] else cr(r['erp'])}</td>"
+            f"<td class='num {vcls}'>{'&mdash;' if var is None else f'{var:+,.4f}'}</td></tr>")
 
-    budget, forecast = N.BUDGET_TOTAL, N.FORECAST_TOTAL
-    ach_b = actual_total / budget * 100 if budget else 0
-    ach_f = actual_total / forecast * 100 if forecast else 0
-    gap_b = (actual_total - budget) / 1e7
+    actual, budget, forecast = N.ACTUAL_TOTAL, N.BUDGET_TOTAL, N.FORECAST_TOTAL
+    ach_b = actual / budget * 100 if budget else 0
+    ach_f = actual / forecast * 100 if forecast else 0
+    gap_b = (actual - budget) / 1e7
 
-    scored = [(t, sum(by_sbu.get(s, 0.0) for s in t['sbus'])) for t in N.TARGETS]
-    top = sorted([x for x in scored if x[1] > 0], key=lambda x: -x[1])[:8]
+    scored = [(r, r['actual']) for r in N.ROWS if r['actual'] > 0]
+    top = sorted(scored, key=lambda x: -x[1])[:8]
     maxv = top[0][1] if top else 1
     top_html = "".join(
         f"<div class='bar'><span class='lbl'>{esc(t['code'] or 'G2G')}</span>"
         f"<span class='track'><i style='width:{v/maxv*100:.1f}%'></i></span>"
         f"<span class='val'>{v/1e7:,.2f}</span></div>" for t, v in top)
-
-    worst = sorted([x for x in scored if x[0]['forecast'] > 0],
+    worst = sorted([(r, r['actual']) for r in N.ROWS if r['forecast'] > 0],
                    key=lambda x: x[1] / x[0]['forecast'])[:8]
     worst_html = "".join(
         f"<li><b>{esc(t['code'] or 'G2G')}</b> {v/t['forecast']*100:,.1f}% of forecast"
         f" <span class='mu'>({v/1e7:,.2f} / {t['forecast']/1e7:,.2f} Cr)</span></li>" for t, v in worst)
 
+    erp_only = "".join(
+        f"<li><b>{esc(r['code'])}</b> &mdash; {esc(r['name'])}: <b>{r['erp']/1e7:,.2f} Cr</b> (no schedule line / target)</li>"
+        for r in N.ERP_ONLY)
+
     html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "november_template.html"),
                 encoding="utf-8").read()
     return (html
-            .replace("__PERIOD__", f"{rd.strftime('%B')} 1&ndash;{rd.day}")
-            .replace("__ASOF__", rd.strftime("%d %B %Y").lstrip("0"))
-            .replace("__DAY__", str(rd.day))
-            .replace("__DIM__", str(data['dm']))
-            .replace("__ACTUAL__", f"{actual_total/1e7:,.2f}")
+            .replace("__PERIOD__", N.PERIOD)
+            .replace("__ASOF__", N.AS_OF)
+            .replace("__DAY__", str(N.DAYS_ELAPSED))
+            .replace("__DIM__", str(N.DAYS_IN_MONTH))
+            .replace("__ACTUAL__", f"{actual/1e7:,.2f}")
             .replace("__BUDGET__", f"{budget/1e7:,.2f}")
             .replace("__FORECAST__", f"{forecast/1e7:,.2f}")
             .replace("__ACHB__", f"{ach_b:,.1f}")
@@ -627,7 +613,9 @@ def build_november_html(data):
             .replace("__GAPB__", f"{gap_b:+,.2f}")
             .replace("__ROWS__", "\n".join(body))
             .replace("__TOP__", top_html)
-            .replace("__WORST__", worst_html))
+            .replace("__WORST__", worst_html)
+            .replace("__ERPONLY__", erp_only)
+            .replace("__ERPONLYTOT__", f"{N.ERP_ONLY_TOTAL/1e7:,.2f}"))
 
 
 def build_html(data):
